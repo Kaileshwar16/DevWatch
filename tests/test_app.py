@@ -1,0 +1,195 @@
+"""Exercise keyboard workflows against Textual's headless terminal driver."""
+
+import asyncio
+import json
+import os
+import signal
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from textual.widgets import RichLog
+
+from devdash.app import DevDashApp
+from devdash.models import DockerInfo, GitInfo, ProjectInfo
+from devdash.screens.commands import CommandsScreen
+from devdash.screens.docker import DockerScreen
+from devdash.screens.git import GitScreen
+from devdash.screens.tasks import TasksScreen
+
+
+class AppTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.write_config('print("3 passed in 0.1s")')
+        self.info = ProjectInfo(root=self.root, name='demo', git=GitInfo(branch='main'), docker=DockerInfo())
+        self.patches = [
+            patch('devdash.app.collect_project', side_effect=self.collect),
+            patch('devdash.screens.docker.detect_docker', return_value=DockerInfo()),
+            patch('devdash.screens.git.git_status', return_value=('On branch main', 0)),
+            patch('devdash.screens.git.git_log_short', return_value=('abc initial', 0)),
+            patch('devdash.screens.git.git_diff_stat', return_value=('Staged:\nfile.py', 0)),
+        ]
+        for item in self.patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    async def collect(self, root, config):
+        self.info.test_command = config.commands.get('test')
+        return self.info
+
+    def write_config(self, code):
+        (self.root / '.devdash.toml').write_text('[commands]\ntest = ' + json.dumps([sys.executable, '-c', code]) + '\n')
+
+    async def wait_for(self, predicate):
+        for _ in range(200):
+            if predicate():
+                return
+            await asyncio.sleep(.01)
+        self.fail('Dashboard did not reach expected state')
+
+    async def test_run_tests_and_refresh_preserves_output(self):
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test(size=(110, 40)) as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('t')
+            await self.wait_for(lambda: app._command_task and app._command_task.done())
+            await pilot.pause()
+            self.assertTrue(app._info.test_result.success)
+            self.assertEqual(app._info.test_result.passed, 3)
+            before = [line.text for line in app.output_panel.lines]
+            self.assertTrue(any('3 passed' in line for line in before))
+            await pilot.press('r')
+            await pilot.pause()
+            self.assertEqual([line.text for line in app.output_panel.lines], before)
+
+    async def test_command_picker_runs_selected_task(self):
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test() as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('c')
+            self.assertIsInstance(app.screen, CommandsScreen)
+            await pilot.press('enter')
+            await self.wait_for(lambda: app._command_task and app._command_task.done())
+            self.assertTrue(app._info.test_result.success)
+            self.assertNotIsInstance(app.screen, CommandsScreen)
+
+    async def test_stop_long_running_service_and_quit(self):
+        (self.root / '.devdash.toml').write_text('[services.api]\ncommand = ' + json.dumps([
+            sys.executable, '-c', 'import time; print("ready", flush=True); time.sleep(20)']) + '\nport = 8000\n')
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test() as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('c', 'enter')
+            await self.wait_for(lambda: app._command_task is not None)
+            await pilot.pause(.1)
+            task = app._command_task
+            await pilot.press('x')
+            self.assertTrue(task.cancelled())
+            await pilot.press('c', 'enter')
+            await self.wait_for(lambda: app._command_task is not task)
+            new_task = app._command_task
+            await pilot.press('q')
+            self.assertTrue(new_task.done())
+
+    async def test_detail_navigation_refreshes_on_return(self):
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test() as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('g')
+            self.assertIsInstance(app.screen, GitScreen)
+            await pilot.press('l', 'd', 'escape')
+            await pilot.press('d')
+            self.assertIsInstance(app.screen, DockerScreen)
+            await pilot.pause()
+            await pilot.press('u')  # No compose file: must not run Docker.
+            self.assertFalse(app.screen._busy)
+            await pilot.press('escape')
+            self.assertNotIsInstance(app.screen, DockerScreen)
+            await pilot.press('r')
+            await pilot.pause()
+            self.assertTrue(app._project_ready)
+
+    async def test_compose_failure_output_is_retained(self):
+        (self.root / 'compose.yaml').touch()
+        app = DevDashApp(self.root, interval=0)
+        with patch('devdash.screens.docker.compose_up', return_value=('daemon error', 1)) as action:
+            async with app.run_test() as pilot:
+                await self.wait_for(lambda: app._project_ready)
+                await pilot.press('d')
+                await pilot.pause()
+                await pilot.press('u')
+                await pilot.pause()
+                action.assert_awaited_once_with(self.root)
+                text = '\n'.join(line.text for line in app.screen.query_one(RichLog).lines)
+                self.assertIn('daemon error', text)
+                self.assertIn('Exit 1', text)
+
+    async def test_small_terminal_and_invalid_config_refresh(self):
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test(size=(60, 24)) as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            self.assertTrue(app.query_one('#dashboard').has_class('narrow'))
+            (self.root / '.devdash.toml').write_text('[commands]\ntest = 42\n')
+            await pilot.press('r')
+            await pilot.pause()
+            self.assertIn('commands.test', app._last_error)
+            self.assertEqual(app._info.name, 'demo')
+
+    async def test_concurrent_services_log_selection_and_quit(self):
+        config = '[commands]\ntest = ' + json.dumps([sys.executable, '-c', 'print("3 passed in 0.1s")']) + '\n'
+        for name in ('api', 'web'):
+            config += f'[services.{name}]\ncommand = ' + json.dumps([
+                sys.executable, '-c', f'import time; print("{name} ready",flush=True); time.sleep(30)']) + '\n'
+        (self.root / '.devdash.toml').write_text(config)
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test(size=(110, 40)) as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            for name in ('api', 'web'):
+                await pilot.press('c', *name, 'enter')
+                await self.wait_for(lambda: f'service:{name}' in app._manager.runs and app._manager.runs[f'service:{name}'].lines)
+            await pilot.press('t')
+            await self.wait_for(lambda: app._manager.runs.get('test') and app._manager.runs['test'].status == 'completed')
+            self.assertTrue(app._info.test_result.success)
+            self.assertEqual(app._manager.runs['service:api'].status, 'running')
+            await pilot.press('a')
+            self.assertIsInstance(app.screen, TasksScreen)
+            await pilot.press('enter')
+            self.assertEqual(app._selected_run, 'service:api')
+            displayed = '\n'.join(line.text for line in app.output_panel.lines)
+            self.assertIn('api ready', displayed)
+            self.assertNotIn('web ready', displayed)
+            await pilot.press('x')
+            self.assertEqual(app._manager.runs['service:api'].status, 'stopped')
+            self.assertEqual(app._manager.runs['service:web'].status, 'running')
+            await pilot.press('q')
+            self.assertTrue(all(run.task.done() for run in app._manager.runs.values()))
+
+    async def test_search_no_results_and_escape(self):
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test() as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('c', *'no-match', 'enter')
+            self.assertIsInstance(app.screen, CommandsScreen)
+            self.assertIsNone(app._command_task)
+            await pilot.press('escape')
+            self.assertNotIsInstance(app.screen, CommandsScreen)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX termination handlers')
+    async def test_termination_stops_tasks_and_restores_signal_handlers(self):
+        previous = signal.getsignal(signal.SIGTERM)
+        self.write_config('import time; print("ready",flush=True); time.sleep(30)')
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test() as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('t')
+            await self.wait_for(lambda: app._manager.runs.get('test') and app._manager.runs['test'].lines)
+            app._handle_signal(signal.SIGTERM)
+            await asyncio.wait_for(app._shutdown_task, 5)
+            self.assertEqual(app.exit_signal, signal.SIGTERM)
+            self.assertEqual(app._manager.runs['test'].status, 'stopped')
+        self.assertEqual(signal.getsignal(signal.SIGTERM), previous)

@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.26,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "devdash"
+version = "0.2.0"
+description = "One command to understand and control your entire development environment"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["cli", "dashboard", "developer-tools", "terminal", "tasks"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development",
+]
+dependencies = [
+    "textual>=0.80.0,<9",
+    "psutil>=5.9.0,<8",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = ["ruff>=0.6,<1"]
+
+[project.scripts]
+devdash = "devdash.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["devdash"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/devdash", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml", "/examples"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

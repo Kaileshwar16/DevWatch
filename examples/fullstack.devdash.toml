@@ -1,0 +1,27 @@
+# Copy to .devdash.toml in your repository and adjust paths/commands.
+[project]
+name = "Full-stack workspace"
+
+[commands.test]
+command = ["python", "-m", "pytest", "-q"]
+cwd = "api"
+description = "Run API tests while the development servers stay up"
+timeout = 120
+
+[commands.lint]
+command = ["npm", "run", "lint"]
+cwd = "web"
+description = "Check the frontend"
+
+[services.api]
+command = ["python", "-m", "uvicorn", "app:app", "--reload", "--port", "8000"]
+cwd = "api"
+port = 8000
+description = "API development server"
+env = { APP_ENV = "development" }
+
+[services.web]
+command = ["npm", "run", "dev", "--", "--port", "5173"]
+cwd = "web"
+port = 5173
+description = "Frontend development server"
