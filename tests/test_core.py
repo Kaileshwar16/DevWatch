@@ -65,7 +65,7 @@ class ProjectTests(unittest.TestCase):
         python.touch()
         self.assertEqual(detect_test_command(self.root, ['Python']), [str(python), '-m', 'pytest'])
         (self.root / 'uv.lock').touch()
-        self.assertEqual(detect_test_command(self.root, ['Python']), ['uv', 'run', 'python', '-m', 'pytest'])
+        self.assertEqual(detect_test_command(self.root, ['Python']), ['uv', 'run', '--no-sync', '--offline', '--no-env-file', '--no-python-downloads', 'python', '-m', 'pytest'])
 
     def test_unittest_suite(self):
         tests = self.root / 'tests'

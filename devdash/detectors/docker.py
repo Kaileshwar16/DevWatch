@@ -18,14 +18,14 @@ def has_compose_file(root: Path) -> bool:
 def detect_docker(root: Path) -> DockerInfo:
     info = DockerInfo(compose_file=has_compose_file(root))
     info.scope = "project" if info.compose_file else "host"
-    _, err, rc = run_sync(["docker", "info", "--format", "{{.ServerVersion}}"], cwd=root, timeout=5)
+    _, err, rc = run_sync(["docker", "info", "--format", "{{.ServerVersion}}"], cwd=root, timeout=2)
     if rc:
         info.error = "Docker is not installed" if rc == 127 else (err or "Docker daemon unavailable")
         return info
     info.available = True
     command = (["docker", "compose", "ps", "--all", "--format", "json"] if info.compose_file
                else ["docker", "ps", "--all", "--format", "{{json .}}"])
-    out, err, rc = run_sync(command, cwd=root)
+    out, err, rc = run_sync(command, cwd=root, timeout=3)
     if rc:
         info.error = err or "Cannot list containers"
         return info

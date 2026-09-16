@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-import json
+import re
+import fnmatch
+from devdash.metadata import read_json, read_text
 from pathlib import Path
 
 
@@ -16,7 +18,7 @@ def detect_languages(root: Path) -> list[str]:
     if (root / "package.json").exists():
         langs.append("TypeScript" if (root / "tsconfig.json").exists() else "JavaScript")
 
-    if (root / "go.mod").exists():
+    if any((root / marker).exists() for marker in ("go.mod", "go.work")):
         langs.append("Go")
 
     if (root / "Cargo.toml").exists():
@@ -37,7 +39,7 @@ def detect_frameworks(root: Path) -> list[str]:
     for f in ("pyproject.toml", "requirements.txt"):
         p = root / f
         if p.exists():
-            py_text += p.read_text(errors="replace").lower()
+            py_text += read_text(p).lower()
 
     if py_text:
         for key, name in (
@@ -52,8 +54,7 @@ def detect_frameworks(root: Path) -> list[str]:
     pkg_path = root / "package.json"
     if pkg_path.exists():
         try:
-            with open(pkg_path) as f:
-                pkg = json.load(f)
+            pkg = read_json(pkg_path)
             all_deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
             for key, name in (
                 ("next", "Next.js"), ("react", "React"), ("vue", "Vue"),
@@ -62,8 +63,8 @@ def detect_frameworks(root: Path) -> list[str]:
             ):
                 if key in all_deps:
                     frameworks.append(name)
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, AttributeError):
+            raise
 
     return frameworks
 
@@ -80,30 +81,12 @@ def detect_package_manager(root: Path) -> str | None:
     if (root / "pdm.lock").exists():
         return "pdm"
 
-    # JS — check packageManager field, then lock files
-    pkg_path = root / "package.json"
-    if pkg_path.exists():
-        try:
-            with open(pkg_path) as f:
-                pm_field = json.load(f).get("packageManager", "")
-            for prefix, name in (("pnpm", "pnpm"), ("yarn", "yarn"), ("bun", "bun")):
-                if pm_field.startswith(prefix):
-                    return name
-        except Exception:
-            pass
-        if (root / "pnpm-lock.yaml").exists():
-            return "pnpm"
-        if (root / "yarn.lock").exists():
-            return "yarn"
-        if (root / "bun.lockb").exists() or (root / "bun.lock").exists():
-            return "bun"
-        if (root / "package-lock.json").exists():
-            return "npm"
-        return "npm"
+    if (root / "package.json").exists():
+        return detect_node_manager(root)
 
     if (root / "Cargo.toml").exists():
         return "cargo"
-    if (root / "go.mod").exists():
+    if any((root / marker).exists() for marker in ("go.mod", "go.work")):
         return "go"
     if (root / "requirements.txt").exists():
         return "pip"
@@ -113,3 +96,46 @@ def detect_package_manager(root: Path) -> str | None:
         return "pip"
 
     return None
+
+
+def _local_node_manager(root: Path) -> str | None:
+    """Node selection is independent of Python lockfiles in mixed-language roots."""
+    try:
+        value = read_json(root / "package.json").get("packageManager", "")
+        if isinstance(value, str):
+            match = re.fullmatch(r"(npm|pnpm|yarn|bun)@\d+(?:\.\d+){0,2}(?:[-+][\w.-]+)?", value)
+            if match:
+                return match[1]
+    except (OSError, ValueError):
+        pass
+    for filename, manager in (("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"),
+                              ("bun.lock", "bun"), ("bun.lockb", "bun"),
+                              ("npm-shrinkwrap.json", "npm"), ("package-lock.json", "npm")):
+        if (root / filename).is_file():
+            return manager
+    return None
+
+
+def detect_node_manager(root: Path) -> str:
+    local = _local_node_manager(root)
+    if local:
+        return local
+    # Inherit only declared workspace membership, not arbitrary ancestor lockfiles.
+    for parent in root.parents:
+        try:
+            package = read_json(parent / "package.json")
+            patterns = package.get("workspaces", [])
+            if isinstance(patterns, dict):
+                patterns = patterns.get("packages", [])
+            relative = root.relative_to(parent).parts
+            if isinstance(patterns, list) and any(
+                isinstance(pattern, str) and len(pattern.split("/")) == len(relative)
+                and all(fnmatch.fnmatchcase(part, rule) for part, rule in zip(relative, pattern.split("/")))
+                for pattern in patterns
+            ):
+                return _local_node_manager(parent) or "npm"
+        except (OSError, ValueError, AttributeError):
+            pass
+        if (parent / ".git").exists():
+            break
+    return "npm"

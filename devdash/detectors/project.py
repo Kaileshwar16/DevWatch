@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
+from devdash.metadata import read_json, read_toml, read_text
 from pathlib import Path
 
-from devdash._toml import tomllib
 
 
 def find_project_root(start: Path | None = None) -> Path:
@@ -23,7 +22,7 @@ def find_project_root(start: Path | None = None) -> Path:
         "Cargo.toml", "pom.xml", "build.gradle", ".git",
         "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml",
         "Makefile", ".devdash.toml", "requirements.txt", "setup.cfg", "Pipfile",
-        "build.gradle.kts",
+        "build.gradle.kts", "go.work", "justfile", "Taskfile.yml", "Taskfile.yaml",
     ]
     current = start.resolve()
     while True:
@@ -42,43 +41,40 @@ def detect_project_name(root: Path) -> str:
     pyproject = root / "pyproject.toml"
     if pyproject.exists():
         try:
-            with open(pyproject, "rb") as f:
-                name = tomllib.load(f).get("project", {}).get("name")
+            name = read_toml(pyproject).get("project", {}).get("name")
             if isinstance(name, str) and name.strip():
                 return name
-        except Exception:
+        except (OSError, ValueError, AttributeError, IndexError):
             pass
 
     # package.json
     pkg = root / "package.json"
     if pkg.exists():
         try:
-            with open(pkg) as f:
-                name = json.load(f).get("name")
+            name = read_json(pkg).get("name")
             if isinstance(name, str) and name.strip():
                 return name
-        except Exception:
+        except (OSError, ValueError, AttributeError, IndexError):
             pass
 
     # go.mod
     gomod = root / "go.mod"
     if gomod.exists():
         try:
-            for line in gomod.read_text().splitlines():
+            for line in read_text(gomod).splitlines():
                 if line.startswith("module "):
                     return line.split()[1].split("/")[-1]
-        except Exception:
+        except (OSError, ValueError, AttributeError, IndexError):
             pass
 
     # Cargo.toml
     cargo = root / "Cargo.toml"
     if cargo.exists():
         try:
-            with open(cargo, "rb") as f:
-                name = tomllib.load(f).get("package", {}).get("name")
+            name = read_toml(cargo).get("package", {}).get("name")
             if isinstance(name, str) and name.strip():
                 return name
-        except Exception:
+        except (OSError, ValueError, AttributeError, IndexError):
             pass
 
     return root.name

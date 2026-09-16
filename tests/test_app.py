@@ -13,6 +13,11 @@ from unittest.mock import patch
 from textual.widgets import RichLog
 
 from devdash.app import DevDashApp
+from devdash.changes import ChangedFile
+from devdash.commands import discover_commands
+from devdash.config import DevDashConfig
+from devdash.impact import affected_commands
+from devdash.screens.impact import ImpactScreen
 from devdash.models import DockerInfo, GitInfo, ProjectInfo
 from devdash.screens.commands import CommandsScreen
 from devdash.screens.docker import DockerScreen
@@ -38,7 +43,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             item.start()
             self.addCleanup(item.stop)
 
-    async def collect(self, root, config):
+    async def collect(self, root, config, commands=None):
         self.info.test_command = config.commands.get('test')
         return self.info
 
@@ -193,3 +198,102 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.exit_signal, signal.SIGTERM)
             self.assertEqual(app._manager.runs['test'].status, 'stopped')
         self.assertEqual(signal.getsignal(signal.SIGTERM), previous)
+
+    def prepare_impact(self, code='print("affected executed")', queued=False):
+        config = '[commands.check]\ncommand = ' + json.dumps([sys.executable, '-c', code]) + '\npaths = ["src/**"]\n'
+        if queued:
+            config += '[commands.after]\ncommand = ' + json.dumps([
+                sys.executable, '-c', 'print("after executed")']) + '\npaths = ["src/**"]\n'
+        (self.root / '.devdash.toml').write_text(config)
+        commands = discover_commands(self.root, DevDashConfig.load(self.root))
+        self.info.changed_files = [ChangedFile('src/auth/token.py', ' ', 'M')]
+        self.info.affected_commands = affected_commands(self.root, commands, self.info.changed_files)
+
+    async def test_impact_view_explains_and_runs_affected_via_session(self):
+        self.prepare_impact()
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test(size=(110, 40)) as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('i')
+            self.assertIsInstance(app.screen, ImpactScreen)
+            rendered = '\n'.join(line.text for line in app.screen.query_one(RichLog).lines)
+            self.assertIn('src/auth/token.py', rendered)
+            self.assertIn('rule: src/**', rendered)
+            self.assertEqual(app._manager.runs, {})
+            await pilot.press('r')
+            await self.wait_for(lambda: app._impact_task and app._impact_task.done())
+            self.assertNotIsInstance(app.screen, ImpactScreen)
+            run = app._manager.runs['check']
+            self.assertEqual(run.status, 'completed')
+            self.assertIn('affected executed', run.lines)
+            self.assertEqual(app._selected_run, 'check')
+            await pilot.press('a')
+            self.assertIsInstance(app.screen, TasksScreen)
+
+    async def test_empty_impact_view_does_not_start_commands(self):
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test(size=(60, 24)) as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('i', 'r')
+            self.assertIsInstance(app.screen, ImpactScreen)
+            self.assertEqual(app._manager.runs, {})
+            rendered = '\n'.join(line.text for line in app.screen.query_one(RichLog).lines)
+            self.assertIn('No affected commands detected.', rendered)
+            await pilot.press('escape')
+            self.assertNotIsInstance(app.screen, ImpactScreen)
+
+    async def test_impact_stop_cancels_queue_and_repeated_run_does_not_duplicate(self):
+        self.prepare_impact('import time; print("ready",flush=True); time.sleep(30)', queued=True)
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test() as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('i', 'r')
+            await self.wait_for(lambda: app._manager.runs.get('check') and app._manager.runs['check'].lines)
+            first = app._impact_task
+            await pilot.press('i', 'r')
+            self.assertIs(app._impact_task, first)
+            await pilot.press('x')
+            await self.wait_for(lambda: app._impact_task.done())
+            self.assertEqual(app._manager.runs['check'].status, 'stopped')
+            self.assertNotIn('after', app._manager.runs)
+
+    async def test_impact_quit_stops_batch(self):
+        self.prepare_impact('import time; print("ready",flush=True); time.sleep(30)', queued=True)
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test() as pilot:
+            await self.wait_for(lambda: app._project_ready)
+            await pilot.press('i', 'r')
+            await self.wait_for(lambda: app._manager.runs.get('check') and app._manager.runs['check'].lines)
+            await pilot.press('q')
+            self.assertTrue(app._impact_task.done())
+            self.assertEqual(app._manager.runs['check'].status, 'stopped')
+            self.assertNotIn('after', app._manager.runs)
+
+
+    async def test_unavailable_and_error_are_not_rendered_as_test_failures(self):
+        from devdash.outcomes import ExecutionState
+        for argv, expected in ((['/devdash-missing-runner'], ExecutionState.UNAVAILABLE),
+                               ([sys.executable, '-c', 'print("pattern ./...: open runtime/data: permission denied"); raise SystemExit(1)'], ExecutionState.ERROR)):
+            (self.root / '.devdash.toml').write_text('[commands]\ntest = ' + json.dumps(argv) + '\n')
+            app = DevDashApp(self.root, interval=0)
+            async with app.run_test(size=(110, 40)) as pilot:
+                await self.wait_for(lambda: app._project_ready)
+                await pilot.press('t')
+                await self.wait_for(lambda: app._command_task and app._command_task.done())
+                await pilot.pause()
+                result = app._manager.runs['test'].result
+                self.assertEqual(result.state, expected)
+                rendered = '\n'.join(line.text for line in app.output_panel.lines)
+                self.assertIn(expected.value.upper(), rendered)
+                self.assertNotIn('FAIL ', rendered)
+
+    async def test_quit_during_command_startup(self):
+        from devdash.outcomes import ExecutionState
+        app = DevDashApp(self.root, interval=0)
+        async with app.run_test():
+            await self.wait_for(lambda: app._project_ready)
+            app._start_command('test')
+            await app.action_quit()
+            run = app._manager.runs['test']
+            self.assertTrue(run.task.done())
+            self.assertEqual(run.result.state, ExecutionState.CANCELLED)

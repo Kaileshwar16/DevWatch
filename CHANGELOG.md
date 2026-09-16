@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 — unreleased
+
+- Distinguish passed/failed checks from error, unavailable, timeout and cancelled outcomes.
+- Add structured reasons, conservative test-output classification and shared command preflight.
+- Check Node script dependencies and Python environments without executing project scripts.
+- Detect package managers, package-local commands and canonical Make/Just/Task/PDM/CI checks.
+- Retain command provenance and heuristic alternatives; preserve user configuration precedence.
+- Explain Go recursive package-discovery permission failures without silently skipping data directories.
+- Show outcomes, provenance and availability in CLI, TUI, doctor, JSON and affected checks.
+- Bound metadata/package discovery, cache manifest reads, isolate detector failures and add safe diagnostics.
+- Close subprocess-startup cancellation races and drain shutdown output without unbounded buffering.
+- Add real-tool fixtures, scale/race tests, clean-wheel smoke, security/contribution docs and release CI.
+
+JSON schema 1 is retained with additive fields. See [release notes](RELEASE_NOTES.md)
+for compatibility details and release checks. This entry is not a publication record.
+
 ## 0.2.0
 
 - Run services and tasks concurrently, with duplicate-start protection and shutdown of all session commands.

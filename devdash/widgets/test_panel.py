@@ -46,10 +46,9 @@ class TestPanel(RichLog):
         """Show the final test result summary."""
         self.write(Text(""))
 
-        if result.success:
-            summary = Text("PASS", style="bold green")
-        else:
-            summary = Text("FAIL", style="bold red")
+        state = result.execution.state.value if result.execution else ("passed" if result.success else "error")
+        label = {"passed": "PASS", "failed": "FAIL"}.get(state, state.upper())
+        summary = Text(label, style="bold green" if state == "passed" else "bold red")
 
         if result.passed or result.failed or result.errors:
             summary.append(f"  {result.passed} passed", style="green")

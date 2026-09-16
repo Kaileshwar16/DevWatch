@@ -40,7 +40,7 @@ class TasksScreen(ModalScreen[str | None]):
         options.clear_options()
         for name, run in self.manager.runs.items():
             code = f"exit {run.returncode}" if run.returncode is not None else ""
-            label = Text(f"{name:<24}  {run.status:<10}  {run.duration:>6.1f}s  {code}")
+            label = Text(f"{name:<24}  {run.result.state.value:<11}  {run.duration:>6.1f}s  {code}")
             options.add_option(Option(label, id=name))
         if options.option_count:
             options.highlighted = min(selected or 0, options.option_count - 1)

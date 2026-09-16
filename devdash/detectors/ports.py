@@ -20,9 +20,10 @@ _PORT_LABELS: dict[int, str] = {
 
 def detect_ports(root: Path) -> list[PortInfo]:
     """Detect listening ports using psutil, with ss fallback."""
-    ports = _detect_with_psutil()
-    if not ports:
-        ports = _detect_with_ss()
+    try:
+        ports = _detect_with_psutil()
+    except RuntimeError:
+        ports = _detect_with_ss(raise_errors=True)
 
     # Sort: well-known/dev ports first, then by number
     ports.sort(key=lambda p: (p.port not in _PORT_LABELS, p.port))
@@ -33,16 +34,16 @@ def _detect_with_psutil() -> list[PortInfo]:
     """Detect ports using psutil."""
     try:
         import psutil
-    except ImportError:
-        return []
+    except ImportError as exc:
+        raise RuntimeError("psutil unavailable") from exc
 
     ports: list[PortInfo] = []
     seen: set[tuple[str, int, int]] = set()
 
     try:
         connections = psutil.net_connections(kind="inet")
-    except (psutil.Error, OSError, NotImplementedError):
-        return []
+    except (psutil.Error, OSError, NotImplementedError) as exc:
+        raise RuntimeError("Port enumeration unavailable through psutil") from exc
 
     for conn in connections:
         if conn.status != "LISTEN":
@@ -75,12 +76,14 @@ def _detect_with_psutil() -> list[PortInfo]:
     return ports
 
 
-def _detect_with_ss() -> list[PortInfo]:
+def _detect_with_ss(*, raise_errors: bool = False) -> list[PortInfo]:
     """Fallback: detect ports using ss command."""
     from devdash.runner import run_sync
 
     out, _, rc = run_sync(["ss", "-tlnp"], timeout=5.0)
     if rc != 0:
+        if raise_errors:
+            raise RuntimeError("Port enumeration unavailable through psutil and ss")
         return []
 
     ports: list[PortInfo] = []

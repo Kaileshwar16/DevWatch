@@ -15,20 +15,47 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from devdash import __version__
+from devdash.changes import collect_changes
 from devdash.commands import discover_commands
 from devdash.config import ConfigError, DevDashConfig
 from devdash.detectors.project import detect_project_name, find_project_root
 from devdash.discovery import collect_project
-from devdash.doctor import check_commands
-from devdash.runner import run_streaming
+from devdash.execution import execute_command
+from devdash.outcomes import ExecutionResult, ExecutionState, ExecutionReason
+from devdash.preflight import preflight_command
+from devdash.impact import affected_commands, impact_report
+from devdash.tasks import TaskManager
 
 
 async def _run_command(command, root: Path, timeout: float | None) -> int:
     """Forward terminal termination into cancellation so descendants are reaped."""
-    task = asyncio.create_task(run_streaming(
-        command.argv, command.cwd or root, lambda line: print(line, flush=True),
-        command.effective_timeout(timeout), env=command.env,
-    ))
+    async def execute():
+        try:
+            result = await execute_command(command, root, lambda line: print(line, flush=True), timeout)
+        except asyncio.CancelledError:
+            result = ExecutionResult(ExecutionState.CANCELLED, reason=ExecutionReason.CANCELLED,
+                                     summary="Command cancelled")
+            print_execution(command, result)
+            raise
+        print_execution(command, result)
+        return result.output, result.exit_code
+    return await _wait_for_execution(asyncio.create_task(execute()))
+
+
+def print_execution(command, result):
+    print(f"\n{result.state.value.upper()} {command.name}\n{result.summary}", file=sys.stderr)
+    if result.detail:
+        print(result.detail, file=sys.stderr)
+    print(f"Command: {shlex.join(command.argv)}\nWorking directory: {command.cwd}\nSource: {command.provenance}", file=sys.stderr)
+    if result.exit_code is not None:
+        print(f"exit {result.exit_code}", file=sys.stderr)
+    if result.suggestion:
+        print(f"Suggestion: {result.suggestion}", file=sys.stderr)
+
+
+
+async def _wait_for_execution(task: asyncio.Task) -> int:
+    """Apply the same signal cleanup to individual commands and task batches."""
     loop = asyncio.get_running_loop()
     interrupted = 0
     previous = {}
@@ -41,7 +68,7 @@ async def _run_command(command, root: Path, timeout: float | None) -> int:
 
     try:
         if os.name == "posix":
-            for signum in (signal.SIGINT, signal.SIGTERM):
+            for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
                 previous[signum] = signal.getsignal(signum)
                 loop.add_signal_handler(signum, stop, signum)
         try:
@@ -55,6 +82,28 @@ async def _run_command(command, root: Path, timeout: float | None) -> int:
         for signum, handler in previous.items():
             loop.remove_signal_handler(signum)
             signal.signal(signum, handler)
+
+
+async def _run_affected(commands, root: Path, timeout: float | None) -> int:
+    def changed(run, line):
+        if line is not None:
+            print(line, flush=True)
+        elif run.returncode is not None:
+            print(f"{run.command.name}: exit {run.returncode}", file=sys.stderr, flush=True)
+            print_execution(run.command, run.result)
+
+    manager = TaskManager(root, timeout, changed)
+
+    async def execute():
+        try:
+            runs = await manager.run_sequence(commands, lambda run: print(
+                f"$ {shlex.join(run.command.argv)}", file=sys.stderr, flush=True))
+            code = next((run.returncode for run in runs if run.returncode), 0)
+            return "", code
+        finally:
+            await manager.shutdown()
+
+    return await _wait_for_execution(asyncio.create_task(execute()))
 
 
 def _nonnegative(value: str) -> float:
@@ -78,8 +127,11 @@ def parser() -> argparse.ArgumentParser:
     mode.add_argument("--json", action="store_true", help="print the snapshot as JSON and exit")
     mode.add_argument("--list-commands", action="store_true", help="list available tasks and services")
     mode.add_argument("--run", metavar="NAME", help="run a task or service:NAME, streaming output")
+    mode.add_argument("--affected", action="store_true", help="explain checks affected by current Git changes")
+    mode.add_argument("--run-affected", action="store_true", help="run affected checks sequentially")
     mode.add_argument("--init", action="store_true", help="create .devdash.toml without overwriting an existing file")
     mode.add_argument("--doctor", action="store_true", help="validate configuration and task executables without running tasks")
+    cli.add_argument("--debug", action="store_true", help="print safe discovery diagnostics (with --doctor for thorough preflight)")
     cli.add_argument("--timeout", type=_nonnegative, default=None, metavar="SECONDS",
                      help="task timeout; 0 disables it (default: 300 for tasks, unlimited for services)")
     cli.add_argument("--interval", type=_nonnegative, default=5.0, metavar="SECONDS",
@@ -98,7 +150,11 @@ def initialize(root: Path) -> Path:
     lines = ["# DevDash runs commands only when you request them.", "[project]",
              f"name = {json.dumps(detect_project_name(root), ensure_ascii=False)}", "", "[commands]"]
     for name, command in commands.items():
-        lines.append(f"{json.dumps(name)} = {json.dumps(command.argv, ensure_ascii=False)}")
+        if command.cwd and command.cwd != root:
+            value = '{ command = ' + json.dumps(command.argv, ensure_ascii=False) + ', cwd = ' + json.dumps(os.path.relpath(command.cwd, root)) + ' }'
+        else:
+            value = json.dumps(command.argv, ensure_ascii=False)
+        lines.append(f"{json.dumps(name)} = {value}")
     lines.extend([
         '# lint = ["ruff", "check", "."]', '# format = ["ruff", "format", "."]', "",
         "# Strings use shell-like quoting, but no shell expansion or pipes.",
@@ -119,22 +175,34 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         config = DevDashConfig.load(root)
         commands = discover_commands(root, config)
+        if args.affected or args.run_affected:
+            for command in commands.values():
+                command.preflight = preflight_command(command, root)
+            changes = collect_changes(root)
+            affected = affected_commands(root, commands, changes.files)
+            print(impact_report(changes, affected), flush=True)
+            if args.run_affected and affected:
+                return asyncio.run(_run_affected([commands[item.name] for item in affected], root, args.timeout))
+            return 0
         if args.doctor:
-            print(f"Project: {root}\nConfiguration: valid")
-            checks = check_commands(root, commands)
-            for check in checks:
-                print(f"{'OK' if check.ok else 'FAIL'} {check.name}: {check.message}")
-            if not checks:
-                print("No commands detected. Run devdash --init to configure tasks.")
-            print("Checks inspect working directories and executables; they do not run tasks or verify dependencies.")
-            return 0 if all(check.ok for check in checks) else 1
+            from devdash.doctor import doctor_report
+            report, code = asyncio.run(doctor_report(root, config, commands, debug=args.debug))
+            print(report)
+            return code
+        if args.debug and not (args.status or args.json or args.run or args.list_commands):
+            info = asyncio.run(collect_project(root, config, commands))
+            from devdash.diagnostics import diagnostic_report
+            print(diagnostic_report(info, commands))
+            return 0
         if args.list_commands:
             if not commands:
                 print("No commands detected. Add [commands] to .devdash.toml, or run devdash --init.")
             for name, command in commands.items():
                 port = f" (port {command.port})" if command.port else ""
                 description = f" — {command.description}" if command.description else ""
-                print(f"{name}{port}\t{shlex.join(command.argv)}{description}")
+                print(f"{name}{port}\t{shlex.join(command.argv)}{description}\n  source: {command.provenance} · cwd: {command.cwd}")
+                if command.preflight and command.preflight.errors:
+                    print("  " + command.preflight.errors[0].summary)
             return 0
         if args.run:
             if args.run not in commands:
@@ -143,7 +211,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"$ {shlex.join(command.argv)}", file=sys.stderr, flush=True)
             return asyncio.run(_run_command(command, root, args.timeout))
         if args.status or args.json:
-            info = asyncio.run(collect_project(root, config))
+            info = asyncio.run(collect_project(root, config, commands))
+            if args.debug:
+                from devdash.diagnostics import diagnostic_report
+                print(diagnostic_report(info, commands), file=sys.stderr)
             if args.json:
                 data = asdict(info)
                 data["schema_version"] = 1

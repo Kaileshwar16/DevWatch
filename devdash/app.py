@@ -27,6 +27,7 @@ from devdash.screens.tasks import TasksScreen
 from devdash.screens.commands import CommandsScreen
 from devdash.screens.docker import DockerScreen
 from devdash.screens.git import GitScreen
+from devdash.screens.impact import ImpactScreen
 from devdash.widgets.docker_panel import DockerPanel
 from devdash.widgets.git_panel import GitPanel
 from devdash.widgets.ports_panel import PortsPanel
@@ -101,11 +102,11 @@ class DevDashApp(App):
         scrollbar-color-active: #909090;
     }
 
-    CommandsScreen, TasksScreen, GitScreen, DockerScreen {
+    CommandsScreen, TasksScreen, GitScreen, DockerScreen, ImpactScreen {
         background: #101010 85%;
         align: center middle;
     }
-    #commands-dialog, #tasks-dialog, #git-container, #docker-container {
+    #commands-dialog, #tasks-dialog, #git-container, #docker-container, #impact-dialog {
         width: 90%;
         max-width: 110;
         height: 85%;
@@ -146,6 +147,7 @@ class DevDashApp(App):
         Binding("c", "commands", "Commands"),
         Binding("x", "stop_command", "Stop"),
         Binding("a", "tasks", "Tasks / logs"),
+        Binding("i", "impact", "Impact"),
         Binding("r", "refresh", "Refresh"),
         Binding("g", "git_view", "Git"),
         Binding("d", "docker_view", "Docker"),
@@ -163,6 +165,7 @@ class DevDashApp(App):
         self._config = DevDashConfig()
         self._commands: dict[str, Command] = {}
         self._command_task: asyncio.Task | None = None
+        self._impact_task: asyncio.Task | None = None
         self._manager: TaskManager | None = None
         self._selected_run: str | None = None
         self._signal_handlers: dict = {}
@@ -216,8 +219,8 @@ class DevDashApp(App):
         try:
             root = find_project_root(self._target_path)
             config = DevDashConfig.load(root)
-            info = await collect_project(root, config)
-            commands = discover_commands(root, config)
+            commands = await asyncio.to_thread(discover_commands, root, config)
+            info = await collect_project(root, config, commands)
             info.test_result = self._info.test_result
             self._info, self._config, self._commands = info, config, commands
             if self._manager is None:
@@ -268,6 +271,28 @@ class DevDashApp(App):
     def action_run_tests(self) -> None:
         self._start_command("test")
 
+    def action_impact(self) -> None:
+        if self._project_ready:
+            # Hold the displayed snapshot steady until the user chooses to run it.
+            commands = self._commands.copy()
+            self.push_screen(ImpactScreen(self._info), lambda names: self._start_affected(names, commands))
+
+    def _start_affected(self, names: list[str] | None, commands: dict[str, Command]) -> None:
+        if not names or not self._manager:
+            return
+        if self._impact_task and not self._impact_task.done():
+            self.notify("Affected checks are already running.")
+            return
+
+        async def execute() -> None:
+            try:
+                await self._manager.run_sequence([commands[name] for name in names],
+                                                 lambda run: self._select_run(run.command.name))
+            except ValueError as exc:
+                self.notify(str(exc), severity="warning")
+
+        self._impact_task = asyncio.create_task(execute())
+
     def action_commands(self) -> None:
         if not self._commands:
             self.notify("No commands detected. Add [commands] to .devdash.toml.", severity="warning")
@@ -303,6 +328,7 @@ class DevDashApp(App):
         run = self._manager.runs[name]
         self._command_task = run.task
         self.output_panel.show_running(run.command.argv)
+        self.output_panel.write(Text(f"source: {run.command.provenance} · cwd: {run.command.cwd}", style="dim"))
         if run.truncated:
             self.output_panel.append_line("[earlier output truncated]")
         for line in run.lines:
@@ -312,9 +338,11 @@ class DevDashApp(App):
 
     def _render_run_status(self, run: TaskRun) -> None:
         code = f" · exit {run.returncode}" if run.returncode is not None else ""
-        self.output_panel.border_title = Text(f"{run.command.name} · {run.status}{code}")
+        self.output_panel.border_title = Text(f"{run.command.name} · {run.result.state.value}{code}")
         if run.status != "running":
-            self.output_panel.write(Text(f"{run.status.capitalize()}{code} · {run.duration:.2f}s"))
+            self.output_panel.write(Text(f"{run.result.state.value.upper()}{code} · {run.duration:.2f}s\n{run.result.summary}"))
+            if run.result.detail:
+                self.output_panel.write(Text(run.result.detail))
 
     def _task_changed(self, run: TaskRun, line: str | None) -> None:
         if line is not None:
@@ -324,7 +352,7 @@ class DevDashApp(App):
         if run.command.name == "test" and run.returncode is not None:
             result = TestResult(command=run.command.argv, output="\n".join(run.lines),
                                 success=run.returncode == 0, returncode=run.returncode,
-                                duration=f"{run.duration:.2f}s")
+                                duration=f"{run.duration:.2f}s", execution=run.result)
             _parse_results(result, result.output)
             self._info.test_result = result
             if self._selected_run == "test":
@@ -333,8 +361,8 @@ class DevDashApp(App):
             self._render_run_status(run)
         if self._manager and not self._manager.closing:
             self._update_panels()
-            self.notify(f"{run.command.name}: {run.status}",
-                        severity="error" if run.status in ("failed", "timed out") else "information")
+            self.notify(f"{run.command.name}: {run.result.state.value}",
+                        severity="error" if run.result.state.value in ("failed", "error", "unavailable", "timeout") else "information")
 
     async def action_stop_command(self) -> None:
         if self._manager and self._selected_run:
@@ -343,6 +371,8 @@ class DevDashApp(App):
     async def action_quit(self) -> None:
         if self._manager:
             await self._manager.shutdown()
+        if self._impact_task:
+            await asyncio.gather(self._impact_task, return_exceptions=True)
         self.exit()
 
     def _handle_signal(self, signum: int) -> None:
@@ -356,6 +386,8 @@ class DevDashApp(App):
     async def on_unmount(self) -> None:
         if self._manager:
             await self._manager.shutdown()
+        if self._impact_task:
+            await asyncio.gather(self._impact_task, return_exceptions=True)
         loop = asyncio.get_running_loop()
         for signum, handler in self._signal_handlers.items():
             loop.remove_signal_handler(signum)
@@ -383,7 +415,11 @@ class DevDashApp(App):
 
     async def action_ports_refresh(self) -> None:
         if self._project_ready:
-            self._info.ports = await asyncio.to_thread(detect_ports, self._info.root)
+            try:
+                self._info.ports = await asyncio.to_thread(detect_ports, self._info.root)
+            except Exception as exc:
+                self.notify(f"Port detection: {type(exc).__name__}", severity="warning")
+                return
             self.ports_panel.border_title = f"Host ports ({len(self._info.ports)})"
             self.ports_panel.render_info(self._info.ports)
 

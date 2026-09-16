@@ -69,8 +69,19 @@ class DevDashConfig:
         if not isinstance(value, dict):
             command_args(value)
             return
-        cls._check_keys(value, {"command", "cwd", "env", "timeout", "description"} | ({"port"} if service else set()), "command")
+        cls._check_keys(value, {"command", "cwd", "env", "timeout", "description"} | ({"port"} if service else {"paths"}), "command")
         command_args(value.get("command"))
+        if "paths" in value:
+            paths = value["paths"]
+            if not isinstance(paths, list) or any(
+                not isinstance(pattern, str) or not pattern.strip()
+                or "\0" in pattern or "\\" in pattern or ":" in pattern
+                or any(part in ("", ".", "..") for part in pattern.split("/"))
+                or any("**" in part and part != "**" for part in pattern.split("/"))
+                for pattern in paths
+            ):
+                raise ConfigError("paths must be an array of nonempty project-relative globs using /; "
+                                  "no absolute paths, . or .. components; ** must be a whole component")
         for key in ("cwd", "description"):
             item = value.get(key)
             if item is not None and (not isinstance(item, str) or not item.strip() or "\0" in item):

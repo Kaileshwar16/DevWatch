@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from devdash.outcomes import ExecutionResult
+from devdash.diagnostics import Diagnostic
+
+from devdash.changes import ChangedFile
+from devdash.impact import AffectedCommand
+
 
 @dataclass
 class GitInfo:
@@ -70,6 +76,7 @@ class TestResult:
     success: bool = False
     running: bool = False
     returncode: int = 0
+    execution: ExecutionResult | None = None
 
 
 @dataclass
@@ -90,3 +97,7 @@ class ProjectInfo:
     test_result: TestResult | None = None
     has_env: bool = False
     warnings: list[str] = field(default_factory=list)
+    changed_files: list[ChangedFile] = field(default_factory=list)
+    affected_commands: list[AffectedCommand] = field(default_factory=list)
+    changes_error: str = ""
+    diagnostics: list[Diagnostic] = field(default_factory=list)

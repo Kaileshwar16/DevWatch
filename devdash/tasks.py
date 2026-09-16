@@ -10,13 +10,15 @@ from pathlib import Path
 from typing import Callable
 
 from devdash.commands import Command
-from devdash.runner import run_streaming
+from devdash.execution import execute_command
+from devdash.outcomes import ExecutionResult, ExecutionState, ExecutionReason
 
 
 @dataclass
 class TaskRun:
     command: Command
     status: str = "running"
+    result: ExecutionResult = field(default_factory=lambda: ExecutionResult(ExecutionState.RUNNING))
     returncode: int | None = None
     started: float = field(default_factory=time.monotonic)
     finished: float | None = None
@@ -79,18 +81,21 @@ class TaskManager:
             self._changed(run, line)
 
         try:
-            _, code = await run_streaming(
-                run.command.argv, run.command.cwd or self.root, output,
-                run.command.effective_timeout(self.timeout), env=run.command.env,
+            run.result = await execute_command(
+                run.command, self.root, output, self.timeout,
             )
-            run.returncode = code
-            run.status = "completed" if code == 0 else ("timed out" if code == 124 else "failed")
+            run.returncode = run.result.exit_code
+            # Retain historical lifecycle strings for Python callers; UI uses result.state.
+            run.status = {ExecutionState.PASSED: "completed", ExecutionState.TIMEOUT: "timed out"}.get(
+                run.result.state, run.result.state.value)
         except asyncio.CancelledError:
             run.status = "stopped"
+            run.result = ExecutionResult(ExecutionState.CANCELLED, reason=ExecutionReason.CANCELLED, summary="Command cancelled")
             output("[cancelled]")
             raise
         except Exception as exc:
-            run.status = "failed"
+            run.status = "error"
+            run.result = ExecutionResult(ExecutionState.ERROR, 126, ExecutionReason.PROCESS_ERROR, "Execution error", str(exc))
             run.returncode = 126
             output(f"Error: {exc}")
         finally:
@@ -107,8 +112,37 @@ class TaskManager:
             # Cancellation may happen before the coroutine's first instruction.
             if run.status == "running":
                 run.status = "stopped"
+                run.result = ExecutionResult(ExecutionState.CANCELLED, reason=ExecutionReason.CANCELLED, summary="Command cancelled")
                 run.finished = time.monotonic()
                 self._changed(run)
+
+    async def run_sequence(self, commands: list[Command],
+                           on_start: Callable[[TaskRun], None] | None = None) -> list[TaskRun]:
+        """Run each distinct invocation once, continuing after failures.
+
+        Cancellation (including stopping the active run) ends the queue. Awaiting
+        the owned task propagates cancellation through the existing runner cleanup.
+        """
+        results = []
+        seen = set()
+        for command in commands:
+            identity = (tuple(command.argv), (command.cwd or self.root).resolve(),
+                        tuple(sorted(command.env.items())), command.effective_timeout(self.timeout))
+            if identity in seen or self.closing:
+                continue
+            seen.add(identity)
+            # Reuse aliases of an invocation that is already running in this session.
+            run = next((run for run in self.runs.values() if run.status == "running"
+                        and run.command.argv == command.argv
+                        and (run.command.cwd or self.root).resolve() == identity[1]
+                        and run.command.env == command.env
+                        and run.command.effective_timeout(self.timeout) == identity[3]), None)
+            run = run or self.start(command)
+            if on_start:
+                on_start(run)
+            await run.task
+            results.append(run)
+        return results
 
     async def shutdown(self) -> None:
         self.closing = True

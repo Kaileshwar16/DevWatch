@@ -46,6 +46,10 @@ class CommandsScreen(ModalScreen[str | None]):
                 label = Text(f"{command.name:<{self._name_width}}  ")
                 label.append(shlex.join(command.argv), style="dim")
                 label.append(port, style="dim")
+                label.append(f"\n  source: {command.provenance} · scope: {command.scope}", style="dim")
+                if command.preflight and command.preflight.errors:
+                    issue = command.preflight.errors[0]
+                    label.append(f"\n  {issue.state.value}: {issue.summary}", style="yellow")
                 if command.description:
                     label.append(f"\n{' ' * (self._name_width + 2)}{command.description}", style="dim")
                 options.add_option(Option(label, id=command.name))

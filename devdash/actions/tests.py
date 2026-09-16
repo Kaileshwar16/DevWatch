@@ -8,7 +8,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from devdash.models import TestResult
-from devdash.runner import run_streaming
+from devdash.execution import execute_command
+from devdash.commands import Command
 
 
 async def run_tests(
@@ -16,9 +17,10 @@ async def run_tests(
     timeout: float | None = 300.0,
 ) -> TestResult:
     started = time.monotonic()
-    output, code = await run_streaming(command, cwd, on_output, timeout)
+    execution = await execute_command(Command("test", command, cwd=cwd), cwd, on_output, timeout)
+    output, code = execution.output, execution.exit_code
     result = TestResult(command=command, output=output, success=code == 0, returncode=code,
-                        duration=f"{time.monotonic() - started:.2f}s")
+                        duration=f"{time.monotonic() - started:.2f}s", execution=execution)
     _parse_results(result, output)
     return result
 
@@ -53,7 +55,7 @@ def _parse_results(result: TestResult, output: str) -> None:
         result.duration = f"{unittest_count[2]}s"
         return
     result.passed = len(re.findall(r"^ok\s", output, re.MULTILINE))
-    result.failed = len(re.findall(r"^FAIL\s+\S", output, re.MULTILINE))
+    result.failed = len(re.findall(r"^\s*--- FAIL: \S", output, re.MULTILINE))
     if result.passed or result.failed:
         return
     js_summary = re.findall(r"^\s*Tests:\s*(.+)$", output, re.MULTILINE)

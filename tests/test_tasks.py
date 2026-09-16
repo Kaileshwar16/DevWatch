@@ -73,7 +73,7 @@ class TaskTests(unittest.IsolatedAsyncioTestCase):
                         Command('cwd', [sys.executable], cwd=self.root / 'missing')):
             run = self.manager.start(command)
             await run.task
-            self.assertEqual(run.status, 'failed')
+            self.assertEqual(run.status, 'unavailable')
             self.assertTrue(run.lines)
 
     async def test_noisy_service_log_is_bounded(self):

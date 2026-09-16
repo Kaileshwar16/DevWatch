@@ -1,6 +1,18 @@
-# DevDash
+# DevWatch / DevDash
 
 A terminal dashboard for your development environment. Run `devdash` inside a project to see its languages, runtimes, Git changes, Docker containers, listening ports, and runnable tasks.
+
+```bash
+devdash              # See your local development environment
+devdash --affected   # Explain which checks match your changes
+devdash --doctor     # Find prerequisites that prevent checks from running
+```
+
+## Why use it?
+
+See project tools, Git changes, containers, ports and runnable commands together.
+Run checks from the right package directory, keep service logs separate, and learn
+whether a check failed or the environment prevented it from running.
 
 ## Install
 
@@ -24,7 +36,8 @@ On Windows, activate with `.venv\Scripts\activate`. Git, Docker, language runtim
 devdash                            # Interactive dashboard for this project
 devdash /path/to/project            # Inspect another project
 devdash --help
-devdash --doctor                   # Check configuration, task paths, and executables
+devdash --doctor                   # Validate environment, dependencies and discovery
+devdash --doctor --debug           # Add safe detector timings and selection diagnostics
 devdash --status                   # Plain-text snapshot, then exit
 devdash --json                     # Machine-readable snapshot, then exit
 devdash --list-commands             # List detected scripts and configured tasks
@@ -46,6 +59,7 @@ The dashboard uses a compact, neutral terminal layout with subtle section divide
 | `t` | Run tests |
 | `c` | Search commands and services; Enter runs the first match, Down moves to the list |
 | `a` | List session tasks with status, elapsed time, and exit code; Enter selects their logs |
+| `i` | Impact snapshot: changed files and selection reasons; `r` runs affected checks |
 | `x` | Stop the task whose output is currently selected |
 | `r` | Refresh all panels and reload configuration |
 | `g` | Git details: `s` status, `l` log, `d` staged and unstaged diff statistics |
@@ -101,9 +115,92 @@ Configured commands override detected commands with the same name. Services appe
 
 String commands support shell-like quoting. Arrays are preferable for paths containing spaces, especially on Windows. Commands execute directly, with no implicit shell: pipes, `&&`, variable expansion, globbing, and `~` expansion are not performed. For those features, configure an explicit shell command or a project script. Project commands are executable code; review a project's configuration and package scripts before running them. Discovery and refresh never run configured commands or services.
 
-DevDash prepends a detected `.venv`, `venv`, or `env` to `PATH`. Python test detection uses that interpreter, or a lockfile-selected `uv`, Poetry, PDM, or Pipenv runner. The project controls what these package managers do when explicitly invoked. `.env` files are only detected, never loaded.
+DevDash prepends a detected `.venv`, `venv`, or `env` to `PATH`. Python test detection uses that interpreter, or a lockfile-selected uv, Poetry, PDM, or Pipenv runner. Detected uv runs disable synchronization, downloads and dotenv loading; detected Pipenv runs disable dotenv loading. Missing intended runners produce UNAVAILABLE. Preflight recognizes local virtual environments; for externally managed environments, configure an explicit interpreter. `.env` files are only detected, never loaded by DevDash.
 
 Tasks time out after 300 seconds unless configured otherwise; configured services have no default timeout. `--timeout 0` disables the timeout, and `--timeout SECONDS` applies to CLI or dashboard tasks. Output streams live, with a bounded recent-output buffer. Commands have no interactive stdin: run tools that prompt for input directly in your terminal. On POSIX, cancellation terminates the process group, including ordinary child processes such as reloaders. Ctrl+C stops session commands from any dashboard screen. POSIX SIGTERM and terminal hangup also shut down dashboard-owned commands; CLI SIGTERM cleans up the running command before returning. Processes that deliberately detach into another session are outside that process group. On Windows, DevDash terminates the direct child; descendant cleanup depends on the tool.
+
+## Change-aware checks
+
+```bash
+devdash --affected                 # Explain which checks match current Git changes
+devdash --run-affected             # Run those checks sequentially
+devdash ../api --run-affected --timeout 60
+```
+
+Staged, unstaged, and untracked files are collected together. Renames match both the old and new paths. Clean working trees, unavailable Git, and unmatched changes produce an explanation and exit successfully without running anything. In the dashboard, press `i` to inspect the latest snapshot and `r` in that view to run its affected checks. Refresh the dashboard to collect new changes. Output and individual exit statuses remain available in the existing task/log view (`a`); `x` stops the active check and the rest of its queue.
+
+Add explicit rules for focused checks in `.devdash.toml`:
+
+```toml
+[commands.test_auth]
+command = ["python", "-m", "pytest", "tests/auth"]
+paths = ["src/auth/**", "tests/auth/**"]
+
+[commands.test_frontend]
+command = ["npm", "test"]
+cwd = "frontend"
+paths = ["frontend/src/**", "frontend/tests/**"]
+
+[commands.lint]
+command = ["ruff", "check", "src/auth", "tests/auth"]
+paths = ["src/auth/**", "tests/auth/**"]
+```
+
+Rules are case-sensitive globs anchored at the selected project root, **not** the command's `cwd`. Use `/` on every platform. `*` matches within one path component, `?` matches one character, and `[abc]` / `[!abc]` match character classes. A whole `**` component matches zero or more components: `src/**/*.py` includes both `src/token.py` and `src/auth/token.py`. Dotfiles match normally. There is no implicit basename matching, negation, brace expansion, or Git-ignore syntax. Absolute paths, backslashes, empty patterns, `.`/`..` components, and embedded `**` (such as `foo**bar`) are rejected. Use `directory/**` for a directory tree. `paths = []` selects nothing. Configured commands without `paths` retain their normal manual behavior and are not automatically selected; services are excluded.
+
+This first version is conservative and path-based, not a full dependency analyser, and uses no AI. Detected `test`, `lint`, `check`, `typecheck`, and `type-check` scripts (including colon variants such as `test:unit`) are candidates. Files inside a check's working directory select it. Package-local checks run before broader root checks; shared files outside known package scopes can select multiple suites. For Python, `src/auth/token.py` also looks for `tests/auth/`, `tests/test_token.py`, and `tests/auth/test_token.py` (and equivalent `test/` paths) as evidence. Automatic checks retain their full original arguments to avoid skipping indirect dependencies. Explicit rules provide narrower runs and should include shared configuration/dependencies that matter to your checks. Package discovery examines at most 512 directories to depth 4, excluding generated trees and directory symlinks. Child commands use names such as `test@api` or `test:unit@web`, with their own `cwd`. Use configured commands with `cwd` and `paths` for deeper or unusual layouts.
+
+Each distinct invocation (arguments, directory, environment, and effective timeout) runs once per batch. Aliases may appear separately in the report, but execute once. Ordinary failures and timeouts do not stop later checks. CLI output reports each executed check's status and returns the first nonzero exit code; Ctrl+C or SIGTERM cancels the queue and cleans up the active process using the existing runner. No tests or project commands run during impact discovery.
+
+JSON snapshots add `changed_files`, `affected_commands`, and `changes_error` while retaining schema version 1 and every existing field. Changed-file records include `path`, `index_status`, `worktree_status`, and optional `original_path`; `?` denotes untracked files. Affected entries contain `name`, `argv`, `cwd`, `matched_files`, `matched_patterns`, and structured `reasons` with a file, strategy, explanation, optional pattern, and nearby tests. Paths are relative to the selected project; shared changes outside a selected package use `../` and cannot match explicit project-root rules. Git failures also appear in `warnings`.
+
+## Execution outcomes
+
+| State | Meaning |
+|-------|---------|
+| PASSED | The command exited zero. |
+| FAILED | Positive evidence shows that tests/checks ran and reported failures. |
+| ERROR | Discovery, configuration, build, permissions or runtime setup prevented completion; also used for ambiguous nonzero exits. |
+| UNAVAILABLE | A required executable, dependency or working directory is missing. |
+| TIMEOUT | DevDash's configured deadline expired. |
+| CANCELLED | The user stopped the command or the session was interrupted. |
+| RUNNING / PENDING | The command is active or awaiting execution. |
+
+A failed check means the check actually ran and reported failure. An unavailable/error
+result means the environment or tool prevented the check from completing. A nonzero
+exit alone is never sufficient to claim FAILED. Supported positive failure evidence
+includes pytest, unittest assertion summaries, Jest, Go test assertions and Cargo.
+Other check formats conservatively remain ERROR on nonzero exits. Raw exit codes
+remain available. CLI execution summaries go to stderr; tool stdout still streams.
+
+Preflight checks cwd, executable resolution and safely recognizable prerequisites.
+For simple Node scripts it checks common local runners such as Jest; complex shell
+scripts and Yarn Plug’n’Play are left to the package manager with a warning.
+Doctor and execution also perform a bounded Go package-enumeration hazard check.
+Unreadable runtime data is reported, never silently excluded from recursive Go checks.
+Preflight is a point-in-time check, not a promise that the command will succeed.
+It never installs dependencies, changes permissions or starts Docker.
+
+Commands retain `source` (`configured` / `detected`) for compatibility and add
+`provenance`, `scope`, `runner` and `preflight`. See provenance in `--list-commands`,
+`--doctor`, the command picker and execution summaries. Simple Makefile, justfile,
+Taskfile, PDM and single-line GitHub Actions checks are statically detected. Existing
+package scripts keep priority over newly discovered canonical alternatives; explicit
+`.devdash.toml` commands win over all detection. Alternatives remain listed;
+`fallback-test` identifies a heuristic alternative to a canonical test target.
+No Make recipes or CI expressions execute during detection.
+
+Node manager selection uses valid `packageManager` metadata, then pnpm/Yarn/Bun/npm
+lockfiles (including npm-shrinkwrap). Scripts execute from the package that defines
+them. Rust uses `cargo test` in its manifest scope. Go uses canonical project checks
+where found, otherwise `go test ./...` is labelled `DevWatch heuristic (Go)`.
+
+`--doctor` returns 0 for no meaningful problems, 1 for command/project problems,
+and 2 for invalid CLI/configuration. Missing optional Git or Docker in a project
+that does not use them remains informational for compatibility. A broken declared
+Compose environment is a doctor problem. `--debug` prints version, platform, root,
+detector timings, selected managers/environments and command provenance; it omits
+environment values, command arguments and arbitrary tool output.
 
 ## Detection and scripting
 
@@ -115,20 +212,20 @@ Tasks time out after 300 seconds unless configured otherwise; configured service
 | Git | Branch, changed paths, ahead/behind counts, latest commit; supports worktrees and detached HEAD |
 | Docker | Running and stopped containers; project scope when a Compose file exists, otherwise explicitly labelled host scope |
 | Ports | Host TCP listeners, addresses, process names and PIDs when permitted |
-| Commands | Python tests, Go/Cargo/Maven/Gradle tests, package.json scripts, config overrides and services |
+| Commands | Python tests, Go/Cargo/Maven/Gradle tests, package.json scripts, static canonical checks, package scopes, config overrides and services |
 
 Docker detection handles both JSON arrays and JSON Lines from Compose. An empty or failing Compose project never falls back to unrelated host containers. See the [Compose ps reference](https://docs.docker.com/reference/cli/docker/compose/ps/) for the underlying container query.
 
 Port visibility depends on operating-system permissions. An empty list means no listeners were visible to DevDash; it is not a guarantee that every port is free. Ports are host-wide and are not assumed to belong to the current project.
 
-`--json` emits one JSON object on stdout with `schema_version` (currently `1`), `name`, `root`, `languages`, `frameworks`, `runtime`, `package_manager`, `venv`, `git`, `docker`, `ports`, `test_command`, `test_result`, `has_env`, `warnings`, and `commands`. Optional unavailable areas are null or empty; detector failures appear in `warnings`. Command entries include their name, argument vector, service flag, optional port, working directory, environment variable names, configured timeout, and description. Additional fields may be added within a schema version; consumers should ignore unknown fields. Snapshots do not execute tasks, so `test_result` is null.
+`--json` emits one JSON object on stdout with `schema_version` (currently `1`), `name`, `root`, `languages`, `frameworks`, `runtime`, `package_manager`, `venv`, `git`, `docker`, `ports`, `test_command`, `test_result`, `has_env`, `warnings`, and `commands`. Optional unavailable areas are null or empty; detector failures appear in `warnings`. Command entries include their name, argument vector, service flag, optional port, working directory, environment variable names, configured timeout, and description. Additional fields may be added within a schema version; consumers should ignore unknown fields. Snapshots do not execute tasks, so `test_result` is null. Commands add `provenance`, `scope`, `runner`, and `preflight`; affected entries also include preflight/provenance. Snapshot `diagnostics` records per-detector duration and failure type. Preflight-only errors use compatibility codes 127 (unavailable) or 126 (error); these are not child-process exit codes.
 
 ```bash
 devdash --json > environment.json
 devdash --run test > test-output.log 2>&1
 ```
 
-Exit codes: snapshots and successful tasks return `0`; failed doctor checks return `1`; CLI/config errors return `2`; command timeouts return `124`; missing executables return `127`; Ctrl+C returns `130`; POSIX SIGTERM returns `143` and dashboard terminal hangup returns `129`. Other command failures retain the tool's exit code. Snapshot success means collection completed, even if an optional tool is unavailable. Redirected output requires `--status`, `--json`, `--doctor`, `--list-commands`, `--init`, or `--run`; the dashboard requires an interactive terminal.
+Exit codes: snapshots and successful tasks return `0`; failed doctor checks return `1`; CLI/config errors return `2`; command timeouts return `124`; missing executables return `127`; Ctrl+C returns `130`; POSIX SIGTERM returns `143` and dashboard terminal hangup returns `129`. Other command failures retain the tool's exit code. Snapshot success means collection completed, even if an optional tool is unavailable. Redirected output requires `--status`, `--json`, `--doctor`, `--list-commands`, `--init`, `--run`, `--affected`, or `--run-affected`; the dashboard requires an interactive terminal.
 
 ## Troubleshooting
 
@@ -145,10 +242,11 @@ Exit codes: snapshots and successful tasks return `0`; failed doctor checks retu
 python -m pip install -e ".[dev]"
 python -m ruff check .
 python -m unittest discover -s tests -v
-python -m pip wheel . --no-deps --wheel-dir dist
+python -m build
+python scripts/smoke_wheel.py dist/devdash-0.3.0-py3-none-any.whl
 ```
 
-Tests use the standard library and Textual's headless driver. They cover CLI behavior, configuration, discovery, real Git repositories, subprocess lifecycle, and dashboard keyboard workflows. Docker actions are mocked; the suite does not start or stop your containers. CI is configured to run the suite and lint on Linux and macOS with Python 3.10, 3.12, and 3.14, plus a Linux job for the minimum supported Textual version. Tests include concurrent services, separate logs, signal cleanup, configuration errors, and task-picker keyboard workflows. Docker actions are mocked; live Docker daemon compatibility still needs release smoke testing.
+Tests use the standard library and Textual's headless driver. They cover CLI behavior, configuration, discovery, real Git repositories, subprocess lifecycle, and dashboard keyboard workflows. Docker actions are mocked; the suite does not start or stop your containers. CI is configured to run the suite and lint on Linux and macOS with Python 3.10, 3.12, and 3.14, plus a Linux job for the minimum supported Textual version. Tests include concurrent services, separate logs, signal cleanup, configuration errors, and task-picker keyboard workflows. A separate opt-in integration job validates live Docker/Compose using read-only queries. Every matrix job builds and smoke-tests a clean wheel installation. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and the [release draft](RELEASE_NOTES.md).
 
 The code separates discovery (`detectors/`, `discovery.py`), configuration and tasks (`config.py`, `commands.py`), subprocess lifecycle (`runner.py`), session task management (`tasks.py`), prerequisite checks (`doctor.py`), the scriptable CLI (`cli.py`), and the Textual UI (`app.py`, `widgets/`, `screens/`). Detectors return dataclasses; the CLI and UI share the same snapshot collection.
 
