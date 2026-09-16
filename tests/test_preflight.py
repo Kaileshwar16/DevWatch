@@ -6,10 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from devdash.commands import Command, discover_commands
-from devdash.config import DevDashConfig
-from devdash.preflight import preflight_command
-from devdash.outcomes import ExecutionReason as R, ExecutionState as S
+from calltrail.commands import Command, discover_commands
+from calltrail.config import CallTrailConfig
+from calltrail.preflight import preflight_command
+from calltrail.outcomes import ExecutionReason as R, ExecutionState as S
 
 
 class PreflightTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class PreflightTests(unittest.TestCase):
     def test_missing_jest_and_installed_local_binary(self):
         (self.root/'package.json').write_text(json.dumps({'scripts': {'test:unit': 'jest'}}))
         command = Command('test', ['npm', 'run', 'test:unit'])
-        with patch('devdash.preflight.resolve_executable', side_effect=lambda value, *_: '/npm' if value == 'npm' else None):
+        with patch('calltrail.preflight.resolve_executable', side_effect=lambda value, *_: '/npm' if value == 'npm' else None):
             result = preflight_command(command, self.root)
             self.assertEqual(result.reason, R.DEPENDENCY_MISSING)
             self.assertEqual(result.result().state, S.UNAVAILABLE)
@@ -46,8 +46,8 @@ class PreflightTests(unittest.TestCase):
             if Path(path) == child:
                 raise PermissionError('denied')
             return real(path)
-        with patch('devdash.preflight.os.scandir', side_effect=scan), \
-             patch('devdash.preflight.resolve_executable', return_value='/go'):
+        with patch('calltrail.preflight.os.scandir', side_effect=scan), \
+             patch('calltrail.preflight.resolve_executable', return_value='/go'):
             result = preflight_command(Command('test', ['go', 'test', './...']), self.root)
         self.assertEqual(result.reason, R.DISCOVERY_FAILED)
         self.assertEqual(result.result().state, S.ERROR)
@@ -58,7 +58,7 @@ class PreflightTests(unittest.TestCase):
         (self.root/'side-effect.js').write_text('throw Error("must not execute")')
         (self.root/'.env').write_text('SECRET=must-not-read')
         with patch('subprocess.Popen', side_effect=AssertionError('spawn forbidden')):
-            commands = discover_commands(self.root, DevDashConfig())
+            commands = discover_commands(self.root, CallTrailConfig())
             preflight_command(commands['test'], self.root)
 
     def test_no_pytest_in_selected_venv(self):

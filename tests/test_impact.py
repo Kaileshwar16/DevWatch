@@ -14,13 +14,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from devdash.changes import ChangedFile, collect_changes
-from devdash.cli import main
-from devdash.commands import Command, discover_commands
-from devdash.config import ConfigError, DevDashConfig
-from devdash.impact import affected_commands, matches_path
-from devdash.models import DockerInfo
-from devdash.tasks import TaskManager
+from calltrail.changes import ChangedFile, collect_changes
+from calltrail.cli import main
+from calltrail.commands import Command, discover_commands
+from calltrail.config import ConfigError, CallTrailConfig
+from calltrail.impact import affected_commands, matches_path
+from calltrail.models import DockerInfo
+from calltrail.tasks import TaskManager
 
 
 class GitImpactTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class GitImpactTests(unittest.TestCase):
         self.root = Path(self.directory.name).resolve()
         self.git('init')
         self.git('config', 'user.email', 'test@example.invalid')
-        self.git('config', 'user.name', 'DevDash Tests')
+        self.git('config', 'user.name', 'CallTrail Tests')
         self.write('src/auth/token.py', 'original\n')
         self.write('tests/auth/test_token.py', 'original test\n')
         self.commit()
@@ -54,8 +54,8 @@ class GitImpactTests(unittest.TestCase):
             text += f'[commands.{name}]\n'
             for key, value in options.items():
                 text += f'{key} = {json.dumps(value)}\n'
-        self.write('.devdash.toml', text)
-        return DevDashConfig.load(self.root)
+        self.write('.calltrail.toml', text)
+        return CallTrailConfig.load(self.root)
 
     def invoke(self, *args):
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -132,7 +132,7 @@ class GitImpactTests(unittest.TestCase):
             self.assertEqual(collect_changes(self.root).files, [])
 
     def test_git_unavailable_and_non_repository(self):
-        with patch('devdash.runner.subprocess.Popen', side_effect=FileNotFoundError('git missing')):
+        with patch('calltrail.runner.subprocess.Popen', side_effect=FileNotFoundError('git missing')):
             changes = collect_changes(self.root)
         self.assertEqual(changes.files, [])
         self.assertIn('git missing', changes.error)
@@ -142,7 +142,7 @@ class GitImpactTests(unittest.TestCase):
         self.assertIn('Git changes unavailable', changes.error)
 
     def test_status_failure_is_explained(self):
-        with patch('devdash.changes.run_sync', side_effect=[(str(self.root) + '\n', '', 0), ('', 'failure', 128)]):
+        with patch('calltrail.changes.run_sync', side_effect=[(str(self.root) + '\n', '', 0), ('', 'failure', 128)]):
             changes = collect_changes(self.root)
         self.assertIn('failure', changes.error)
         self.assertEqual(changes.files, [])
@@ -169,7 +169,7 @@ class GitImpactTests(unittest.TestCase):
     def test_nearby_python_tests_and_full_suite_fallback(self):
         self.write('pyproject.toml', '[tool.pytest.ini_options]\n')
         self.write('tests/test_token.py')
-        commands = discover_commands(self.root, DevDashConfig())
+        commands = discover_commands(self.root, CallTrailConfig())
         results = affected_commands(self.root, commands, [ChangedFile('src/auth/token.py')])
         self.assertEqual(results[0].argv, commands['test'].argv)
         self.assertEqual(set(results[0].reasons[0].nearby_tests),
@@ -181,7 +181,7 @@ class GitImpactTests(unittest.TestCase):
     def test_detected_check_scripts_exclude_servers_and_formatters(self):
         self.write('package.json', json.dumps({'scripts': {name: 'example' for name in
                    ('test', 'test:unit', 'lint', 'check', 'typecheck', 'dev', 'format', 'publish')}}))
-        commands = discover_commands(self.root, DevDashConfig())
+        commands = discover_commands(self.root, CallTrailConfig())
         results = affected_commands(self.root, commands, [ChangedFile('src/index.ts')])
         self.assertEqual([item.name for item in results], ['test', 'test:unit', 'lint', 'check', 'typecheck'])
 
@@ -234,7 +234,7 @@ class GitImpactTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn('success', out.splitlines())
         self.assertIn('check: exit 0', err)
-        with patch('devdash.changes.run_sync', return_value=('', 'Git missing', 127)):
+        with patch('calltrail.changes.run_sync', return_value=('', 'Git missing', 127)):
             code, out, err = self.invoke('--run-affected')
         self.assertEqual(code, 0)
         self.assertIn('Git changes unavailable: Git missing', out)
@@ -242,7 +242,7 @@ class GitImpactTests(unittest.TestCase):
         self.assertEqual(err, '')
 
     def test_run_affected_timeout_continues_and_honors_cwd_env(self):
-        self.write('.devdash.toml', '[commands.slow]\ncommand = ' + json.dumps([
+        self.write('.calltrail.toml', '[commands.slow]\ncommand = ' + json.dumps([
             sys.executable, '-c', 'import time; time.sleep(30)']) + '\npaths = ["src/**"]\n'
             '[commands.after]\ncommand = ' + json.dumps([
                 sys.executable, '-c', 'import os; print(os.path.basename(os.getcwd()), os.environ["IMPACT_TEST"])']) +
@@ -256,11 +256,11 @@ class GitImpactTests(unittest.TestCase):
     def test_json_additive_schema_redacts_env_and_git_status_collected_once(self):
         self.config({'auth': {'command': ['echo'], 'paths': ['src/**']}})
         self.write('src/auth/token.py')
-        from devdash.changes import run_sync
-        with patch('devdash.discovery.detect_docker', return_value=DockerInfo()), \
-             patch('devdash.discovery.detect_ports', return_value=[]), \
-             patch('devdash.discovery.detect_runtime', return_value={}), \
-             patch('devdash.changes.run_sync', wraps=run_sync) as git:
+        from calltrail.changes import run_sync
+        with patch('calltrail.discovery.detect_docker', return_value=DockerInfo()), \
+             patch('calltrail.discovery.detect_ports', return_value=[]), \
+             patch('calltrail.discovery.detect_runtime', return_value={}), \
+             patch('calltrail.changes.run_sync', wraps=run_sync) as git:
             code, out, _ = self.invoke('--json')
         self.assertEqual(code, 0)
         data = json.loads(out)
@@ -287,7 +287,7 @@ class GitImpactTests(unittest.TestCase):
                     'first': {'command': [sys.executable, '-c', script], 'paths': ['**']},
                     'after': {'command': [sys.executable, '-c', f'open({str(after)!r}, "w").close()'], 'paths': ['**']},
                 })
-                proc = subprocess.Popen([sys.executable, '-m', 'devdash', str(self.root), '--run-affected'],
+                proc = subprocess.Popen([sys.executable, '-m', 'calltrail', str(self.root), '--run-affected'],
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                 try:
                     deadline = time.monotonic() + 5
@@ -327,8 +327,8 @@ class PathRuleTests(unittest.TestCase):
                       ['src/../tests'], ['./src'], ['src\\**'], ['C:/src'], ['src/'],
                       ['src//file'], ['src/a**b'], ['src/\0file']):
             with self.subTest(paths=paths), self.assertRaisesRegex(ConfigError, 'commands.check: paths'):
-                DevDashConfig({'commands': {'check': {'command': ['echo'], 'paths': paths}}})
-        DevDashConfig({'commands': {'check': {'command': ['echo'], 'paths': []}}})
+                CallTrailConfig({'commands': {'check': {'command': ['echo'], 'paths': paths}}})
+        CallTrailConfig({'commands': {'check': {'command': ['echo'], 'paths': []}}})
 
 
 class SequenceTests(unittest.IsolatedAsyncioTestCase):

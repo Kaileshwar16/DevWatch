@@ -1,4 +1,4 @@
-# Copy to .devdash.toml in your repository and adjust paths/commands.
+# Copy to .calltrail.toml in your repository and adjust paths/commands.
 [project]
 name = "Full-stack workspace"
 

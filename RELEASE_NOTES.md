@@ -1,6 +1,6 @@
 # 0.3.0 release notes — draft, not published
 
-DevDash now distinguishes checks that failed from checks that could not run.
+CallTrail now distinguishes checks that failed from checks that could not run.
 Missing Jest/pytest prerequisites produce UNAVAILABLE; Go package-enumeration errors
 produce ERROR with a discovery reason. CLI, doctor, affected checks and dashboard
 share the same preflight and structured execution outcomes.
@@ -14,7 +14,7 @@ arrives before the subprocess handle is returned.
 
 ## Compatibility
 
-The distribution and executable are still `devdash`. All existing configuration
+The distribution and executable are still `calltrail`. All existing configuration
 keys, CLI flags and TUI shortcuts remain. Configured commands still override
 detection. JSON stays at schema version 1: fields are additive, `commands` remains
 a mapping, and `source` still says `configured` or `detected`; `provenance` supplies

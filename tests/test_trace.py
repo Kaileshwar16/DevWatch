@@ -3,9 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from devdash.trace.python import PythonAstProvider
-from devdash.trace.graph import CallHierarchy
-from devdash.trace.source import IndexLimits
+from calltrail.trace.python import PythonAstProvider
+from calltrail.trace.graph import CallHierarchy
+from calltrail.trace.source import IndexLimits
 
 
 class TraceTests(unittest.TestCase):
@@ -163,7 +163,7 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(len(graph.to_entry(target).paths[0].nodes), 1)
 
     def test_preview_is_bounded_and_rejects_outside_paths(self):
-        from devdash.trace.models import SymbolLocation
+        from calltrail.trace.models import SymbolLocation
         self.write('demo.py', '\n'.join(f'# line {i}' for i in range(100)))
         self.assertLessEqual(len(self.provider.preview(SymbolLocation('demo.py', 50), 1000)), 21)
         with self.assertRaises(ValueError):
@@ -185,7 +185,7 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(len(index.warnings), 1)
         self.assertEqual(self.graph().lookup('café')[0].location.path, 'latin.py')
         self.write('blocked.py', 'def blocked(): pass')
-        with patch('devdash.trace.python.read_source', side_effect=PermissionError):
+        with patch('calltrail.trace.python.read_source', side_effect=PermissionError):
             index = self.provider.refresh()
         self.assertTrue(any('blocked.py: PermissionError' in warning for warning in index.warnings))
         self.assertFalse(any(s.name == 'blocked' for s in index.symbols.values()))
@@ -199,7 +199,7 @@ class TraceTests(unittest.TestCase):
                 self.assertTrue(index.warnings)
 
     def test_large_cyclic_graph_has_bounded_paths_and_rendering(self):
-        from devdash.trace.presentation import trace_data
+        from calltrail.trace.presentation import trace_data
         self.write('large.py', '\n'.join(f'def f{i}(): f{(i+1)%600}(); f0()' for i in range(600)))
         graph = self.graph()
         symbol = graph.lookup('f0')[0]

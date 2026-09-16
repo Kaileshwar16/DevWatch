@@ -7,7 +7,7 @@ adjacency queries and bounded breadth-first reverse walks. The CLI and Textual
 screen share presentation data; neither implements language resolution.
 
 `source.py` owns file discovery and bounded encoding-aware source reads. It reuses
-DevDash's generated-directory exclusions and adds site-packages/generated/vendor.
+CallTrail's generated-directory exclusions and adds site-packages/generated/vendor.
 It does not follow symlinks or enter nested repositories. It scans only the chosen
 project boundary; Git tracked files are not required, so new untracked code works.
 
@@ -40,7 +40,7 @@ Measured on Linux x86_64, Python 3.12.13, on 2026-09-16 with
 
 | Repository | Files | Symbols | Resolved edges | Initial index | Cached refresh | Median query |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| DevWatch | 72 | 593 | 815 | 208.743 ms | 26.588 ms | 0.130 ms |
+| CallTrail | 72 | 593 | 815 | 208.743 ms | 26.588 ms | 0.130 ms |
 | Local Scrapy checkout | 439 | 6,906 | 5,936 | 1,824.709 ms | 199.126 ms | 0.121 ms |
 
 These are single local runs, not cross-platform guarantees. Symbol counts include

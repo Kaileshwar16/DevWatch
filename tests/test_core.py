@@ -13,16 +13,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from devdash.actions.tests import _parse_results
-from devdash.cli import initialize, main
-from devdash.commands import discover_commands
-from devdash.config import ConfigError, DevDashConfig, command_args
-from devdash.detectors.docker import detect_docker
-from devdash.detectors.git import detect_git
-from devdash.detectors.project import find_project_root
-from devdash.detectors.tests import detect_test_command
-from devdash.models import ProjectInfo, TestResult
-from devdash.doctor import check_commands
+from calltrail.actions.tests import _parse_results
+from calltrail.cli import initialize, main
+from calltrail.commands import discover_commands
+from calltrail.config import ConfigError, CallTrailConfig, command_args
+from calltrail.detectors.docker import detect_docker
+from calltrail.detectors.git import detect_git
+from calltrail.detectors.project import find_project_root
+from calltrail.detectors.tests import detect_test_command
+from calltrail.models import ProjectInfo, TestResult
+from calltrail.doctor import check_commands
 
 
 class ProjectTests(unittest.TestCase):
@@ -42,7 +42,7 @@ class ProjectTests(unittest.TestCase):
     def test_plain_directory_and_config_only_project(self):
         with patch("pathlib.Path.exists", return_value=False):
             self.assertEqual(find_project_root(self.root), self.root)
-        (self.root / '.devdash.toml').touch()
+        (self.root / '.calltrail.toml').touch()
         nested = self.root / 'src'
         nested.mkdir()
         self.assertEqual(find_project_root(nested), self.root)
@@ -54,7 +54,7 @@ class ProjectTests(unittest.TestCase):
             'packageManager': 'pnpm@9.0.0',
             'scripts': {'test': 'vitest run', 'lint': 'eslint .', 'dev': 'vite'},
         }))
-        commands = discover_commands(self.root, DevDashConfig())
+        commands = discover_commands(self.root, CallTrailConfig())
         self.assertEqual(commands['test'].argv, ['pnpm', 'run', 'test'])
         self.assertEqual(commands['lint'].argv, ['pnpm', 'run', 'lint'])
 
@@ -81,8 +81,8 @@ class ProjectTests(unittest.TestCase):
                      {'services': {'api': {'command': 'python', 'port': 65536}}},
                      {'project': {'name': 123}}):
             with self.subTest(data=data), self.assertRaises(ConfigError):
-                DevDashConfig(data)
-        config = DevDashConfig({'commands': {'test': ['echo', 'a b']},
+                CallTrailConfig(data)
+        config = CallTrailConfig({'commands': {'test': ['echo', 'a b']},
                                'services': {'api': {'command': 'python -m http.server', 'port': 8000}}})
         commands = discover_commands(self.root, config)
         self.assertEqual(commands['test'].argv, ['echo', 'a b'])
@@ -92,7 +92,7 @@ class ProjectTests(unittest.TestCase):
 
     def test_init_round_trip_and_no_overwrite(self):
         path = initialize(self.root)
-        self.assertEqual(DevDashConfig.load(self.root).project_name, self.root.name)
+        self.assertEqual(CallTrailConfig.load(self.root).project_name, self.root.name)
         before = path.read_bytes()
         with self.assertRaises(FileExistsError):
             initialize(self.root)
@@ -100,7 +100,7 @@ class ProjectTests(unittest.TestCase):
 
     def test_cli_invalid_config_and_missing_path_are_readable(self):
         for path in (self.root / 'missing', self.root):
-            (self.root / '.devdash.toml').write_text('[commands]\ntest = 1\n')
+            (self.root / '.calltrail.toml').write_text('[commands]\ntest = 1\n')
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
                 code = main([str(path), '--list-commands'])
@@ -110,7 +110,7 @@ class ProjectTests(unittest.TestCase):
     def test_cli_json_schema(self):
         out = io.StringIO()
         info = ProjectInfo(name='demo', root=self.root)
-        with patch('devdash.cli.collect_project', return_value=info), contextlib.redirect_stdout(out):
+        with patch('calltrail.cli.collect_project', return_value=info), contextlib.redirect_stdout(out):
             self.assertEqual(main([str(self.root), '--json']), 0)
         data = json.loads(out.getvalue())
         self.assertEqual(data['root'], str(self.root))
@@ -118,17 +118,17 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(data['warnings'], [])
 
     def test_cli_task_streams_and_preserves_exit_code(self):
-        (self.root / '.devdash.toml').write_text(
+        (self.root / '.calltrail.toml').write_text(
             '[commands]\ncheck = ' + json.dumps([sys.executable, '-c', 'print("hello"); raise SystemExit(7)']) + '\n')
-        result = subprocess.run([sys.executable, '-m', 'devdash', str(self.root), '--run', 'check'],
+        result = subprocess.run([sys.executable, '-m', 'calltrail', str(self.root), '--run', 'check'],
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(result.stdout, 'hello\n')
 
     def test_cli_timeout_and_unknown_task(self):
-        (self.root / '.devdash.toml').write_text(
+        (self.root / '.calltrail.toml').write_text(
             '[commands]\nslow = ' + json.dumps([sys.executable, '-c', 'import time; time.sleep(20)']) + '\n')
-        result = subprocess.run([sys.executable, '-m', 'devdash', str(self.root), '--run', 'slow', '--timeout', '.1'],
+        result = subprocess.run([sys.executable, '-m', 'calltrail', str(self.root), '--run', 'slow', '--timeout', '.1'],
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 124, result.stderr)
         self.assertIn('[timed out]', result.stdout)
@@ -140,7 +140,7 @@ class ProjectTests(unittest.TestCase):
             return subprocess.run(['git', *args], cwd=self.root, check=True, capture_output=True)
         git('init')
         git('config', 'user.email', 'test@example.invalid')
-        git('config', 'user.name', 'DevDash Tests')
+        git('config', 'user.name', 'CallTrail Tests')
         (self.root / 'first file.txt').write_text('before\n')
         git('add', '.')
         git('commit', '-m', 'initial')
@@ -156,7 +156,7 @@ class ProjectTests(unittest.TestCase):
 
     def test_docker_empty_compose_never_falls_back_to_host(self):
         (self.root / 'compose.yaml').touch()
-        with patch('devdash.detectors.docker.run_sync', side_effect=[('28', '', 0), ('[]', '', 0)]) as run:
+        with patch('calltrail.detectors.docker.run_sync', side_effect=[('28', '', 0), ('[]', '', 0)]) as run:
             info = detect_docker(self.root)
         self.assertEqual(run.call_count, 2)
         self.assertEqual(info.scope, 'project')
@@ -168,7 +168,7 @@ class ProjectTests(unittest.TestCase):
         row = {'ID': 'abc', 'Name': 'api', 'State': 'exited', 'Publishers': [
             {'URL': '127.0.0.1', 'PublishedPort': 8000, 'TargetPort': 80, 'Protocol': 'tcp'}]}
         for output in (json.dumps([row]), json.dumps(row)):
-            with patch('devdash.detectors.docker.run_sync', side_effect=[('28', '', 0), (output, '', 0)]):
+            with patch('calltrail.detectors.docker.run_sync', side_effect=[('28', '', 0), (output, '', 0)]):
                 info = detect_docker(self.root)
             self.assertEqual(info.containers[0].container_id, 'abc')
             self.assertEqual(info.containers[0].ports, '127.0.0.1:8000->80/tcp')
@@ -198,26 +198,26 @@ class ProjectTests(unittest.TestCase):
         ]
         for value in invalid:
             with self.subTest(value=value), self.assertRaises(ConfigError):
-                DevDashConfig({'commands': {'check': value}})
+                CallTrailConfig({'commands': {'check': value}})
         with self.assertRaisesRegex(ConfigError, 'unknown option'):
-            DevDashConfig({'comands': {'test': 'echo'}})
+            CallTrailConfig({'comands': {'test': 'echo'}})
 
     def test_extended_cli_command_uses_cwd_env_and_timeout(self):
         (self.root / 'api').mkdir()
-        argv = [sys.executable, '-c', 'import os; print(os.path.basename(os.getcwd()),os.environ["DEVDASH_VALUE"])']
-        (self.root / '.devdash.toml').write_text(
+        argv = [sys.executable, '-c', 'import os; print(os.path.basename(os.getcwd()),os.environ["CALLTRAIL_VALUE"])']
+        (self.root / '.calltrail.toml').write_text(
             '[commands.check]\ncommand = ' + json.dumps(argv) + '\ncwd = "api"\ntimeout = 5\n'
-            'description = "Check environment"\nenv = { DEVDASH_VALUE = "hello" }\n')
-        result = subprocess.run([sys.executable, '-m', 'devdash', str(self.root), '--run', 'check'],
+            'description = "Check environment"\nenv = { CALLTRAIL_VALUE = "hello" }\n')
+        result = subprocess.run([sys.executable, '-m', 'calltrail', str(self.root), '--run', 'check'],
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, 'api hello\n')
 
     def test_doctor_checks_paths_without_executing_commands(self):
         marker = self.root / 'must-not-exist'
-        config = DevDashConfig({'commands': {
+        config = CallTrailConfig({'commands': {
             'good': [sys.executable, '-c', f'open({str(marker)!r}, "w").close()'],
-            'missing': ['/devdash-does-not-exist'],
+            'missing': ['/calltrail-does-not-exist'],
             'cwd': {'command': [sys.executable], 'cwd': 'missing'},
         }})
         checks = check_commands(self.root, discover_commands(self.root, config))
@@ -225,16 +225,16 @@ class ProjectTests(unittest.TestCase):
         self.assertFalse(marker.exists())
 
     def test_doctor_cli_exit_codes(self):
-        for executable, expected in ((sys.executable, 0), ('/devdash-does-not-exist', 1)):
-            (self.root / '.devdash.toml').write_text('[commands]\ncheck = ' + json.dumps([executable]) + '\n')
+        for executable, expected in ((sys.executable, 0), ('/calltrail-does-not-exist', 1)):
+            (self.root / '.calltrail.toml').write_text('[commands]\ncheck = ' + json.dumps([executable]) + '\n')
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(main([str(self.root), '--doctor']), expected)
 
     def test_json_redacts_configured_environment_values(self):
-        (self.root / '.devdash.toml').write_text(
+        (self.root / '.calltrail.toml').write_text(
             '[commands.check]\ncommand = ["echo", "ready"]\nenv = { TOKEN = "secret-value" }\n')
         out = io.StringIO()
-        with patch('devdash.cli.collect_project', return_value=ProjectInfo(root=self.root)), contextlib.redirect_stdout(out):
+        with patch('calltrail.cli.collect_project', return_value=ProjectInfo(root=self.root)), contextlib.redirect_stdout(out):
             self.assertEqual(main([str(self.root), '--json']), 0)
         self.assertNotIn('secret-value', out.getvalue())
         data = json.loads(out.getvalue())
@@ -242,9 +242,9 @@ class ProjectTests(unittest.TestCase):
         self.assertEqual(data['commands']['check']['env_keys'], ['TOKEN'])
 
     def test_ss_preserves_high_ports_and_multiple_addresses(self):
-        from devdash.detectors.ports import _detect_with_ss
+        from calltrail.detectors.ports import _detect_with_ss
         output = 'State Recv-Q Send-Q Local Peer Process\nLISTEN 0 128 127.0.0.1:55000 0.0.0.0:*\nLISTEN 0 128 [::1]:55000 [::]:*\n'
-        with patch('devdash.runner.run_sync', return_value=(output, '', 0)):
+        with patch('calltrail.runner.run_sync', return_value=(output, '', 0)):
             ports = _detect_with_ss()
         self.assertEqual([(p.address, p.port) for p in ports], [('127.0.0.1', 55000), ('::1', 55000)])
 
@@ -255,8 +255,8 @@ class ProjectTests(unittest.TestCase):
         code = ('import subprocess,sys,os,json,time; from pathlib import Path; '
                 'child=subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"]); '
                 f'Path({str(ready)!r}).write_text(json.dumps([os.getpid(),child.pid])); time.sleep(30)')
-        (self.root / '.devdash.toml').write_text('[services.api]\ncommand = ' + json.dumps([sys.executable, '-c', code]) + '\n')
-        proc = subprocess.Popen([sys.executable, '-m', 'devdash', str(self.root), '--run', 'service:api'],
+        (self.root / '.calltrail.toml').write_text('[services.api]\ncommand = ' + json.dumps([sys.executable, '-c', code]) + '\n')
+        proc = subprocess.Popen([sys.executable, '-m', 'calltrail', str(self.root), '--run', 'service:api'],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             deadline = time.monotonic() + 5

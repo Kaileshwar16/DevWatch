@@ -11,8 +11,8 @@ body:
   - type: textarea
     attributes:
       label: Environment
-      description: DevDash/Python versions, operating system, relevant project tools, and install method.
+      description: CallTrail/Python versions, operating system, relevant project tools, and install method.
   - type: textarea
     attributes:
       label: Diagnostics
-      description: Optional `devdash --doctor --debug` output. Inspect paths, arguments and logs for private information before sharing. Never include secrets or .env contents.
+      description: Optional `calltrail --doctor --debug` output. Inspect paths, arguments and logs for private information before sharing. Never include secrets or .env contents.

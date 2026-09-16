@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from devdash.commands import Command
-from devdash.tasks import TaskManager
+from calltrail.commands import Command
+from calltrail.tasks import TaskManager
 
 
 class TaskTests(unittest.IsolatedAsyncioTestCase):
@@ -60,8 +60,8 @@ class TaskTests(unittest.IsolatedAsyncioTestCase):
         subdir = self.root / 'api'
         subdir.mkdir()
         command = Command('check', [sys.executable, '-c',
-            'import os,time; print(os.getcwd(),os.environ["DEVDASH_TEST_VALUE"],flush=True); time.sleep(20)'],
-            cwd=subdir, env={'DEVDASH_TEST_VALUE': 'configured'}, timeout=.2)
+            'import os,time; print(os.getcwd(),os.environ["CALLTRAIL_TEST_VALUE"],flush=True); time.sleep(20)'],
+            cwd=subdir, env={'CALLTRAIL_TEST_VALUE': 'configured'}, timeout=.2)
         run = self.manager.start(command)
         await asyncio.wait_for(run.task, 5)
         self.assertEqual(run.status, 'timed out')
@@ -69,7 +69,7 @@ class TaskTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(f'{subdir} configured', run.lines)
 
     async def test_missing_executable_and_invalid_directory_are_failures(self):
-        for command in (Command('missing', ['/devdash-does-not-exist']),
+        for command in (Command('missing', ['/calltrail-does-not-exist']),
                         Command('cwd', [sys.executable], cwd=self.root / 'missing')):
             run = self.manager.start(command)
             await run.task

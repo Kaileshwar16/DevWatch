@@ -2,8 +2,8 @@
 import asyncio
 import sys
 import unittest
-from devdash.outcomes import ExecutionReason as R, ExecutionState as S, classify
-from devdash.runner import run_process
+from calltrail.outcomes import ExecutionReason as R, ExecutionState as S, classify
+from calltrail.runner import run_process
 
 
 class ClassificationTests(unittest.TestCase):
@@ -41,7 +41,7 @@ class ProcessOutcomeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_during_spawn_reaps_child(self):
         from unittest.mock import patch
-        from devdash import runner
+        from calltrail import runner
         original = runner._spawn_unprotected
         created = asyncio.Event()
         children = []

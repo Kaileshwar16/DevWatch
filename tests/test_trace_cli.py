@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from devdash.cli import main
+from calltrail.cli import main
 
 
 class TraceCliTests(unittest.TestCase):
@@ -50,14 +50,14 @@ class TraceCliTests(unittest.TestCase):
 
     def test_static_path_does_not_spawn_or_collect_environment(self):
         with patch('subprocess.Popen', side_effect=AssertionError('execution forbidden')), \
-             patch('devdash.cli.discover_commands', side_effect=AssertionError('unneeded discovery')):
+             patch('calltrail.cli.discover_commands', side_effect=AssertionError('unneeded discovery')):
             self.assertEqual(self.invoke('b')[0], 0)
 
     def test_original_flags_and_trace_directory_still_work(self):
         (self.root/'trace').mkdir()
-        with patch('devdash.cli.collect_project') as collect, patch('os.getcwd', return_value=str(self.root)), \
+        with patch('calltrail.cli.collect_project') as collect, patch('os.getcwd', return_value=str(self.root)), \
              contextlib.redirect_stdout(io.StringIO()):
-            from devdash.models import ProjectInfo
+            from calltrail.models import ProjectInfo
             collect.return_value = ProjectInfo(root=self.root/'trace')
             self.assertEqual(main(['trace', '--json']), 0)
 

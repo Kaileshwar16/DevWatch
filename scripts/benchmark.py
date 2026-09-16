@@ -5,13 +5,13 @@ from pathlib import Path
 import statistics
 import tempfile
 import time
-from devdash.commands import discover_commands
-from devdash.config import DevDashConfig
-from devdash.discovery import collect_project
+from calltrail.commands import discover_commands
+from calltrail.config import CallTrailConfig
+from calltrail.discovery import collect_project
 
 
 async def measure(root):
-    config = DevDashConfig()
+    config = CallTrailConfig()
     discovery, snapshots = [], []
     for _ in range(5):
         start = time.perf_counter()

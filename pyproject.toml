@@ -3,10 +3,10 @@ requires = ["hatchling>=1.26,<2"]
 build-backend = "hatchling.build"
 
 [project]
-name = "devdash"
+name = "calltrail"
 version = "0.3.0"
 description = "A terminal dashboard for local projects, environment diagnostics, and explainable checks"
-authors = [{name = "DevDash contributors"}]
+authors = [{name = "CallTrail contributors"}]
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -32,21 +32,21 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/Kaileshwar16/DevWatch"
-Issues = "https://github.com/Kaileshwar16/DevWatch/issues"
-Changelog = "https://github.com/Kaileshwar16/DevWatch/blob/main/CHANGELOG.md"
+Repository = "https://github.com/Kaileshwar16/CallTrail"
+Issues = "https://github.com/Kaileshwar16/CallTrail/issues"
+Changelog = "https://github.com/Kaileshwar16/CallTrail/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = ["ruff>=0.6,<1", "build>=1.2,<2", "pytest>=8,<10"]
 
 [project.scripts]
-devdash = "devdash.cli:main"
+calltrail = "calltrail.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["devdash"]
+packages = ["calltrail"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/devdash", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml", "/examples", "/SECURITY.md", "/CONTRIBUTING.md", "/RELEASE_NOTES.md", "/scripts", "/docs/tracing.md"]
+include = ["/calltrail", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml", "/examples", "/SECURITY.md", "/CONTRIBUTING.md", "/RELEASE_NOTES.md", "/scripts", "/docs/tracing.md"]
 
 [tool.ruff]
 target-version = "py310"

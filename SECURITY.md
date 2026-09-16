@@ -9,15 +9,15 @@ commitment. This is a small, best-effort project.
 ## Reporting a vulnerability
 
 Use GitHub's **Report a vulnerability** option on the
-[repository security page](https://github.com/Kaileshwar16/DevWatch/security) if
+[repository security page](https://github.com/Kaileshwar16/CallTrail/security) if
 private reporting is enabled. If that option is unavailable, open a
-[repository issue](https://github.com/Kaileshwar16/DevWatch/issues/new) asking the
+[repository issue](https://github.com/Kaileshwar16/CallTrail/issues/new) asking the
 maintainer for a private reporting channel. Do not include exploit details,
 credentials, or private repository contents in that public request.
 
 ## Trust boundary
 
-DevDash is a local developer tool, not a sandbox. Configured commands, package
+CallTrail is a local developer tool, not a sandbox. Configured commands, package
 scripts, Make/Just/Task targets, test suites, interpreter startup hooks, and tools
 resolved through PATH are executable code with your user permissions. Inspect
 untrusted repositories and their commands before running them. Preflight is an
@@ -27,7 +27,7 @@ Discovery intentionally does not execute project commands, scripts, tests, Make
 recipes, CI expressions, or install hooks. It reads bounded project metadata and
 queries installed tools for versions, Git state, ports, and Docker state. Those
 installed tools and their configuration remain part of the trust boundary.
-DevDash never reads `.env` contents. Only their presence is displayed.
+CallTrail never reads `.env` contents. Only their presence is displayed.
 
 Function tracing parses Python source with the standard library AST and packaging
 metadata as data. It never imports the application, evaluates decorators, executes
@@ -35,7 +35,7 @@ setup.py/tests, or launches language servers. Source discovery has explicit limi
 does not follow symlinks, and stays within the selected project boundary. Static
 results describe possible relationships and must not be treated as runtime evidence.
 
-DevDash never installs project dependencies, runs sudo, changes permissions,
+CallTrail never installs project dependencies, runs sudo, changes permissions,
 deletes runtime data, or starts Docker to repair an environment. Detected uv
 commands disable environment synchronization, downloads, and dotenv loading;
 detected Pipenv commands disable dotenv loading. Explicitly requested project

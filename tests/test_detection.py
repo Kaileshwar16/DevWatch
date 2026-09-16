@@ -4,11 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from devdash.commands import discover_commands
-from devdash.config import DevDashConfig
-from devdash.discovery import collect_project
-from devdash.detectors.language import detect_node_manager
-from devdash.models import DockerInfo
+from calltrail.commands import discover_commands
+from calltrail.config import CallTrailConfig
+from calltrail.discovery import collect_project
+from calltrail.detectors.language import detect_node_manager
+from calltrail.models import DockerInfo
 
 
 class DetectionTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class DetectionTests(unittest.TestCase):
         return path
 
     def commands(self):
-        return discover_commands(self.root, DevDashConfig())
+        return discover_commands(self.root, CallTrailConfig())
 
     def test_package_managers_and_explicit_metadata(self):
         package = self.write('package.json', '{}')
@@ -67,7 +67,7 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(commands['test'].argv, ['make','test'])
         self.assertEqual(commands['test'].provenance, 'Makefile')
         self.assertEqual(commands['fallback-test'].argv, ['go','test','./...'])
-        override = discover_commands(self.root, DevDashConfig({'commands': {'test': ['echo','configured']}}))
+        override = discover_commands(self.root, CallTrailConfig({'commands': {'test': ['echo','configured']}}))
         self.assertEqual(override['test'].argv, ['echo','configured'])
         self.assertEqual(override['test'].source, 'configured')
 
@@ -107,10 +107,10 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(self.commands()['test'].argv[0], 'pnpm')
 
     def test_init_preserves_package_cwd(self):
-        from devdash.cli import initialize
+        from calltrail.cli import initialize
         self.write('web/package.json', '{"scripts":{"test":"node --test"}}')
         initialize(self.root)
-        configured = discover_commands(self.root, DevDashConfig.load(self.root))
+        configured = discover_commands(self.root, CallTrailConfig.load(self.root))
         self.assertEqual(configured['test@web'].cwd, self.root/'web')
 
 
@@ -118,14 +118,14 @@ class ResilienceTests(unittest.IsolatedAsyncioTestCase):
     async def test_independent_detector_failures_and_safe_debug(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with patch('devdash.discovery.detect_frameworks', side_effect=RuntimeError('SECRET_VALUE')), \
-                 patch('devdash.discovery.detect_docker', return_value=DockerInfo()), \
-                 patch('devdash.discovery.detect_ports', side_effect=NotImplementedError('unsupported')):
-                info = await collect_project(root, DevDashConfig(), {})
+            with patch('calltrail.discovery.detect_frameworks', side_effect=RuntimeError('SECRET_VALUE')), \
+                 patch('calltrail.discovery.detect_docker', return_value=DockerInfo()), \
+                 patch('calltrail.discovery.detect_ports', side_effect=NotImplementedError('unsupported')):
+                info = await collect_project(root, CallTrailConfig(), {})
             self.assertEqual(info.name, root.name)
             self.assertEqual(info.ports, [])
             self.assertTrue(any(item.detector == 'frameworks' and not item.ok for item in info.diagnostics))
-            from devdash.diagnostics import diagnostic_report
+            from calltrail.diagnostics import diagnostic_report
             self.assertNotIn('SECRET_VALUE', diagnostic_report(info, {}))
             self.assertNotIn('SECRET_VALUE', str(info.warnings))
 
@@ -135,6 +135,6 @@ class ResilienceTests(unittest.IsolatedAsyncioTestCase):
         def detect(root):
             self.assertNotEqual(threading.get_ident(), main)
             return []
-        with tempfile.TemporaryDirectory() as directory, patch('devdash.discovery.detect_frameworks', detect), \
-             patch('devdash.discovery.detect_docker', return_value=DockerInfo()):
-            await collect_project(Path(directory), DevDashConfig(), {})
+        with tempfile.TemporaryDirectory() as directory, patch('calltrail.discovery.detect_frameworks', detect), \
+             patch('calltrail.discovery.detect_docker', return_value=DockerInfo()):
+            await collect_project(Path(directory), CallTrailConfig(), {})

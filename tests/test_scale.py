@@ -5,11 +5,11 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from devdash.changes import ChangedFile, collect_changes
-from devdash.commands import Command, discover_commands
-from devdash.config import DevDashConfig
-from devdash.detectors.git import detect_git
-from devdash.impact import affected_commands
+from calltrail.changes import ChangedFile, collect_changes
+from calltrail.commands import Command, discover_commands
+from calltrail.config import CallTrailConfig
+from calltrail.detectors.git import detect_git
+from calltrail.impact import affected_commands
 
 
 class ScaleTests(unittest.TestCase):
@@ -32,7 +32,7 @@ class ScaleTests(unittest.TestCase):
                 package.mkdir()
                 (package/'package.json').write_text(json.dumps({'scripts':{'test':'node --test'}}))
             started = time.monotonic()
-            commands = discover_commands(root, DevDashConfig())
+            commands = discover_commands(root, CallTrailConfig())
             self.assertLessEqual(len(commands), 511)
             self.assertTrue(any('limited to 512' in warning for warning in commands.warnings))
             self.assertLess(time.monotonic()-started, 15)
@@ -43,7 +43,7 @@ class ScaleTests(unittest.TestCase):
             def git(*args):
                 return subprocess.run(['git',*args], cwd=root, check=True, capture_output=True)
             git('init')
-            git('config','user.name','DevDash fixture')
+            git('config','user.name','CallTrail fixture')
             git('config','user.email','fixture@example.invalid')
             (root/'tracked').write_text('tracked')
             git('add','.')

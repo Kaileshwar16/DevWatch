@@ -8,9 +8,9 @@ from unittest.mock import patch
 
 from textual.widgets import Input, RichLog
 
-from devdash.app import DevDashApp
-from devdash.models import ProjectInfo
-from devdash.screens.trace import TraceScreen
+from calltrail.app import CallTrailApp
+from calltrail.models import ProjectInfo
+from calltrail.screens.trace import TraceScreen
 
 
 class TraceAppTests(unittest.IsolatedAsyncioTestCase):
@@ -19,7 +19,7 @@ class TraceAppTests(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.directory.name)
         (self.root/'demo.py').write_text('def main(): a()\ndef a(): b()\ndef b(): pass\n'
                                         'if __name__ == "__main__": main()\n')
-        self.mock = patch('devdash.app.collect_project', return_value=ProjectInfo(root=self.root, name='demo'))
+        self.mock = patch('calltrail.app.collect_project', return_value=ProjectInfo(root=self.root, name='demo'))
         self.mock.start()
 
     async def asyncTearDown(self):
@@ -34,7 +34,7 @@ class TraceAppTests(unittest.IsolatedAsyncioTestCase):
         self.fail('Trace screen did not reach expected state')
 
     async def test_incoming_outgoing_entry_paths_history_and_preview(self):
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test(size=(110, 40)) as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('f')
@@ -62,12 +62,12 @@ class TraceAppTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIsInstance(app.screen, TraceScreen)
 
     async def test_slow_index_does_not_block_escape(self):
-        from devdash.trace.python import PythonAstProvider
+        from calltrail.trace.python import PythonAstProvider
         original = PythonAstProvider.refresh
         def slow(provider):
             time.sleep(.4)
             return original(provider)
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         with patch.object(PythonAstProvider, 'refresh', slow):
             async with app.run_test(size=(70, 30)) as pilot:
                 await self.wait_for(lambda: app._project_ready)
@@ -79,7 +79,7 @@ class TraceAppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_refresh_invalidates_graph_and_duplicate_selection(self):
         (self.root/'other.py').write_text('def b(): pass')
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test(size=(100, 40)) as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('f')

@@ -9,12 +9,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from devdash.commands import Command, discover_commands
-from devdash.config import DevDashConfig
-from devdash.execution import execute_command
-from devdash.outcomes import ExecutionState as S, ExecutionReason as R
-from devdash.runner import run_process
-from devdash.tasks import TaskManager
+from calltrail.commands import Command, discover_commands
+from calltrail.config import CallTrailConfig
+from calltrail.execution import execute_command
+from calltrail.outcomes import ExecutionState as S, ExecutionReason as R
+from calltrail.runner import run_process
+from calltrail.tasks import TaskManager
 
 
 class RepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -28,7 +28,7 @@ class RepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
     @unittest.skipUnless(shutil.which('npm'), 'npm unavailable')
     async def test_node_missing_dependency_is_unavailable(self):
         (self.root/'package.json').write_text(json.dumps({'scripts': {'test:unit':'jest'}}))
-        command = discover_commands(self.root, DevDashConfig())['test:unit']
+        command = discover_commands(self.root, CallTrailConfig())['test:unit']
         result = await execute_command(command, self.root)
         self.assertEqual((result.state, result.reason), (S.UNAVAILABLE, R.DEPENDENCY_MISSING))
         self.assertFalse((self.root/'node_modules').exists())
@@ -37,7 +37,7 @@ class RepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_node_project_passes(self):
         (self.root/'package.json').write_text(json.dumps({'scripts': {'test':'node --test example.test.cjs'}}))
         (self.root/'example.test.cjs').write_text("const test=require('node:test'); test('works',()=>{});\n")
-        command = discover_commands(self.root, DevDashConfig())['test']
+        command = discover_commands(self.root, CallTrailConfig())['test']
         result = await execute_command(command, self.root)
         self.assertEqual(result.state, S.PASSED, result.output)
 
@@ -50,7 +50,7 @@ class RepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         for expected in (S.FAILED, S.PASSED):
             test.write_text('import unittest\nclass Example(unittest.TestCase):\n'
                             f' def test_result(self): self.assertTrue({expected == S.PASSED!r})\n')
-            command = discover_commands(self.root, DevDashConfig())['test']
+            command = discover_commands(self.root, CallTrailConfig())['test']
             # Suppress bytecode, so same-second fixture edits cannot reuse old code.
             command.env['PYTHONDONTWRITEBYTECODE'] = '1'
             result = await execute_command(command, self.root)
@@ -68,21 +68,21 @@ class RepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     @unittest.skipUnless(shutil.which('go'), 'Go unavailable')
     async def test_go_module(self):
-        (self.root/'go.mod').write_text('module example.test/devwatch\ngo 1.20\n')
+        (self.root/'go.mod').write_text('module example.test/calltrail\ngo 1.20\n')
         (self.root/'example_test.go').write_text('package demo\nimport "testing"\nfunc TestExample(t *testing.T) {}\n')
-        command = discover_commands(self.root, DevDashConfig())['test']
+        command = discover_commands(self.root, CallTrailConfig())['test']
         command.env.update({'GOTOOLCHAIN':'local', 'GOPROXY':'off'})
         result = await execute_command(command, self.root, timeout=60)
         self.assertEqual(result.state, S.PASSED, result.output)
 
     @unittest.skipUnless(shutil.which('go') and os.name == 'posix' and os.geteuid() != 0, 'requires Go and non-root POSIX permissions')
     async def test_real_go_unreadable_directory(self):
-        (self.root/'go.mod').write_text('module example.test/devwatch\ngo 1.20\n')
+        (self.root/'go.mod').write_text('module example.test/calltrail\ngo 1.20\n')
         blocked = self.root/'runtime-data'
         blocked.mkdir()
         blocked.chmod(0)
         try:
-            command = discover_commands(self.root, DevDashConfig())['test']
+            command = discover_commands(self.root, CallTrailConfig())['test']
             result = await execute_command(command, self.root)
             self.assertEqual((result.state, result.reason), (S.ERROR, R.DISCOVERY_FAILED))
             self.assertIn("runtime-data: permission denied", result.detail)
@@ -97,7 +97,7 @@ class RepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         (self.root/'Cargo.toml').write_text('[package]\nname="fixture"\nversion="0.1.0"\nedition="2021"\n')
         (self.root/'src').mkdir()
         (self.root/'src/lib.rs').write_text('#[test]\nfn works() { assert_eq!(2+2,4); }\n')
-        command = discover_commands(self.root, DevDashConfig())['test']
+        command = discover_commands(self.root, CallTrailConfig())['test']
         command.env['CARGO_NET_OFFLINE'] = 'true'
         result = await execute_command(command, self.root, timeout=60)
         self.assertEqual(result.state, S.PASSED, result.output)
@@ -141,10 +141,10 @@ class RepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await manager.shutdown()
 
 
-@unittest.skipUnless(os.environ.get('DEVDASH_LIVE_DOCKER') == '1', 'opt-in live Docker smoke')
+@unittest.skipUnless(os.environ.get('CALLTRAIL_LIVE_DOCKER') == '1', 'opt-in live Docker smoke')
 class DockerIntegrationTests(unittest.TestCase):
     def test_live_daemon_and_compose_json(self):
-        from devdash.detectors.docker import detect_docker
+        from calltrail.detectors.docker import detect_docker
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             info = detect_docker(root)

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from devdash.runner import project_environment, run_async, run_streaming, run_sync
+from calltrail.runner import project_environment, run_async, run_streaming, run_sync
 
 
 class RunnerTests(unittest.IsolatedAsyncioTestCase):
@@ -29,7 +29,7 @@ class RunnerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_executable_is_streamed(self):
         received = []
-        _, code = await run_streaming(['/does-not-exist/devdash-test'], on_output=received.append)
+        _, code = await run_streaming(['/does-not-exist/calltrail-test'], on_output=received.append)
         self.assertEqual(code, 127)
         self.assertIn('Cannot run', received[0])
 

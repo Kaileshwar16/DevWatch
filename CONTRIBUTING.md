@@ -10,7 +10,7 @@ python -m ruff check .
 python -m unittest discover -s tests -v
 git diff --check
 python -m build
-python scripts/smoke_wheel.py dist/devdash-0.3.0-py3-none-any.whl
+python scripts/smoke_wheel.py dist/calltrail-0.3.0-py3-none-any.whl
 ```
 
 The wheel smoke test creates a new temporary virtual environment, installs only
@@ -23,7 +23,7 @@ using only an editable installation.
 
 - `commands.py`, `canonical.py`, `scopes.py`: static command discovery, provenance,
   bounded package scopes, and config precedence.
-- `config.py`: the backward-compatible `.devdash.toml` schema and validation.
+- `config.py`: the backward-compatible `.calltrail.toml` schema and validation.
 - `metadata.py`: bounded, stat-invalidated metadata reads and parse caching.
 - `preflight.py`: read-only prerequisites, without imports of project modules.
 - `outcomes.py`, `execution.py`: shared structured outcomes and preflight/execution.
@@ -54,7 +54,7 @@ ERROR. Keep raw exit codes and the compatibility tuple runner APIs.
 Use temporary directories/repositories and local fixtures. Unit tests should not
 fetch arbitrary repositories or install dependencies. Tests needing Node, Go,
 Cargo or pytest skip when unavailable; CI's integration job supplies these tools.
-`DEVDASH_LIVE_DOCKER=1 python -m unittest discover -s tests -p test_integration.py -v`
+`CALLTRAIL_LIVE_DOCKER=1 python -m unittest discover -s tests -p test_integration.py -v`
 adds a read-only daemon/Compose smoke; it does not create containers or pull images.
 
 Test cwd ownership, config precedence, preflight availability, output classification,

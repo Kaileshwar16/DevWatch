@@ -12,17 +12,17 @@ from unittest.mock import patch
 
 from textual.widgets import RichLog
 
-from devdash.app import DevDashApp
-from devdash.changes import ChangedFile
-from devdash.commands import discover_commands
-from devdash.config import DevDashConfig
-from devdash.impact import affected_commands
-from devdash.screens.impact import ImpactScreen
-from devdash.models import DockerInfo, GitInfo, ProjectInfo
-from devdash.screens.commands import CommandsScreen
-from devdash.screens.docker import DockerScreen
-from devdash.screens.git import GitScreen
-from devdash.screens.tasks import TasksScreen
+from calltrail.app import CallTrailApp
+from calltrail.changes import ChangedFile
+from calltrail.commands import discover_commands
+from calltrail.config import CallTrailConfig
+from calltrail.impact import affected_commands
+from calltrail.screens.impact import ImpactScreen
+from calltrail.models import DockerInfo, GitInfo, ProjectInfo
+from calltrail.screens.commands import CommandsScreen
+from calltrail.screens.docker import DockerScreen
+from calltrail.screens.git import GitScreen
+from calltrail.screens.tasks import TasksScreen
 
 
 class AppTests(unittest.IsolatedAsyncioTestCase):
@@ -33,11 +33,11 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         self.write_config('print("3 passed in 0.1s")')
         self.info = ProjectInfo(root=self.root, name='demo', git=GitInfo(branch='main'), docker=DockerInfo())
         self.patches = [
-            patch('devdash.app.collect_project', side_effect=self.collect),
-            patch('devdash.screens.docker.detect_docker', return_value=DockerInfo()),
-            patch('devdash.screens.git.git_status', return_value=('On branch main', 0)),
-            patch('devdash.screens.git.git_log_short', return_value=('abc initial', 0)),
-            patch('devdash.screens.git.git_diff_stat', return_value=('Staged:\nfile.py', 0)),
+            patch('calltrail.app.collect_project', side_effect=self.collect),
+            patch('calltrail.screens.docker.detect_docker', return_value=DockerInfo()),
+            patch('calltrail.screens.git.git_status', return_value=('On branch main', 0)),
+            patch('calltrail.screens.git.git_log_short', return_value=('abc initial', 0)),
+            patch('calltrail.screens.git.git_diff_stat', return_value=('Staged:\nfile.py', 0)),
         ]
         for item in self.patches:
             item.start()
@@ -48,7 +48,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         return self.info
 
     def write_config(self, code):
-        (self.root / '.devdash.toml').write_text('[commands]\ntest = ' + json.dumps([sys.executable, '-c', code]) + '\n')
+        (self.root / '.calltrail.toml').write_text('[commands]\ntest = ' + json.dumps([sys.executable, '-c', code]) + '\n')
 
     async def wait_for(self, predicate):
         for _ in range(200):
@@ -58,7 +58,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         self.fail('Dashboard did not reach expected state')
 
     async def test_run_tests_and_refresh_preserves_output(self):
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test(size=(110, 40)) as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('t')
@@ -73,7 +73,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([line.text for line in app.output_panel.lines], before)
 
     async def test_command_picker_runs_selected_task(self):
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test() as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('c')
@@ -84,9 +84,9 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIsInstance(app.screen, CommandsScreen)
 
     async def test_stop_long_running_service_and_quit(self):
-        (self.root / '.devdash.toml').write_text('[services.api]\ncommand = ' + json.dumps([
+        (self.root / '.calltrail.toml').write_text('[services.api]\ncommand = ' + json.dumps([
             sys.executable, '-c', 'import time; print("ready", flush=True); time.sleep(20)']) + '\nport = 8000\n')
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test() as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('c', 'enter')
@@ -102,7 +102,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(new_task.done())
 
     async def test_detail_navigation_refreshes_on_return(self):
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test() as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('g')
@@ -121,8 +121,8 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_compose_failure_output_is_retained(self):
         (self.root / 'compose.yaml').touch()
-        app = DevDashApp(self.root, interval=0)
-        with patch('devdash.screens.docker.compose_up', return_value=('daemon error', 1)) as action:
+        app = CallTrailApp(self.root, interval=0)
+        with patch('calltrail.screens.docker.compose_up', return_value=('daemon error', 1)) as action:
             async with app.run_test() as pilot:
                 await self.wait_for(lambda: app._project_ready)
                 await pilot.press('d')
@@ -135,11 +135,11 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('Exit 1', text)
 
     async def test_small_terminal_and_invalid_config_refresh(self):
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test(size=(60, 24)) as pilot:
             await self.wait_for(lambda: app._project_ready)
             self.assertTrue(app.query_one('#dashboard').has_class('narrow'))
-            (self.root / '.devdash.toml').write_text('[commands]\ntest = 42\n')
+            (self.root / '.calltrail.toml').write_text('[commands]\ntest = 42\n')
             await pilot.press('r')
             await pilot.pause()
             self.assertIn('commands.test', app._last_error)
@@ -150,8 +150,8 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         for name in ('api', 'web'):
             config += f'[services.{name}]\ncommand = ' + json.dumps([
                 sys.executable, '-c', f'import time; print("{name} ready",flush=True); time.sleep(30)']) + '\n'
-        (self.root / '.devdash.toml').write_text(config)
-        app = DevDashApp(self.root, interval=0)
+        (self.root / '.calltrail.toml').write_text(config)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test(size=(110, 40)) as pilot:
             await self.wait_for(lambda: app._project_ready)
             for name in ('api', 'web'):
@@ -175,7 +175,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(run.task.done() for run in app._manager.runs.values()))
 
     async def test_search_no_results_and_escape(self):
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test() as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('c', *'no-match', 'enter')
@@ -188,7 +188,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
     async def test_termination_stops_tasks_and_restores_signal_handlers(self):
         previous = signal.getsignal(signal.SIGTERM)
         self.write_config('import time; print("ready",flush=True); time.sleep(30)')
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test() as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('t')
@@ -204,14 +204,14 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
         if queued:
             config += '[commands.after]\ncommand = ' + json.dumps([
                 sys.executable, '-c', 'print("after executed")']) + '\npaths = ["src/**"]\n'
-        (self.root / '.devdash.toml').write_text(config)
-        commands = discover_commands(self.root, DevDashConfig.load(self.root))
+        (self.root / '.calltrail.toml').write_text(config)
+        commands = discover_commands(self.root, CallTrailConfig.load(self.root))
         self.info.changed_files = [ChangedFile('src/auth/token.py', ' ', 'M')]
         self.info.affected_commands = affected_commands(self.root, commands, self.info.changed_files)
 
     async def test_impact_view_explains_and_runs_affected_via_session(self):
         self.prepare_impact()
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test(size=(110, 40)) as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('i')
@@ -231,7 +231,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(app.screen, TasksScreen)
 
     async def test_empty_impact_view_does_not_start_commands(self):
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test(size=(60, 24)) as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('i', 'r')
@@ -244,7 +244,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_impact_stop_cancels_queue_and_repeated_run_does_not_duplicate(self):
         self.prepare_impact('import time; print("ready",flush=True); time.sleep(30)', queued=True)
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test() as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('i', 'r')
@@ -259,7 +259,7 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_impact_quit_stops_batch(self):
         self.prepare_impact('import time; print("ready",flush=True); time.sleep(30)', queued=True)
-        app = DevDashApp(self.root, interval=0)
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test() as pilot:
             await self.wait_for(lambda: app._project_ready)
             await pilot.press('i', 'r')
@@ -271,11 +271,11 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_unavailable_and_error_are_not_rendered_as_test_failures(self):
-        from devdash.outcomes import ExecutionState
-        for argv, expected in ((['/devdash-missing-runner'], ExecutionState.UNAVAILABLE),
+        from calltrail.outcomes import ExecutionState
+        for argv, expected in ((['/calltrail-missing-runner'], ExecutionState.UNAVAILABLE),
                                ([sys.executable, '-c', 'print("pattern ./...: open runtime/data: permission denied"); raise SystemExit(1)'], ExecutionState.ERROR)):
-            (self.root / '.devdash.toml').write_text('[commands]\ntest = ' + json.dumps(argv) + '\n')
-            app = DevDashApp(self.root, interval=0)
+            (self.root / '.calltrail.toml').write_text('[commands]\ntest = ' + json.dumps(argv) + '\n')
+            app = CallTrailApp(self.root, interval=0)
             async with app.run_test(size=(110, 40)) as pilot:
                 await self.wait_for(lambda: app._project_ready)
                 await pilot.press('t')
@@ -288,8 +288,8 @@ class AppTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn('FAIL ', rendered)
 
     async def test_quit_during_command_startup(self):
-        from devdash.outcomes import ExecutionState
-        app = DevDashApp(self.root, interval=0)
+        from calltrail.outcomes import ExecutionState
+        app = CallTrailApp(self.root, interval=0)
         async with app.run_test():
             await self.wait_for(lambda: app._project_ready)
             app._start_command('test')

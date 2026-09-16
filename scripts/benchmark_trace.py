@@ -5,8 +5,8 @@ import statistics
 import time
 from pathlib import Path
 
-from devdash.trace.graph import CallHierarchy
-from devdash.trace.python import PythonAstProvider
+from calltrail.trace.graph import CallHierarchy
+from calltrail.trace.python import PythonAstProvider
 
 
 def measure(root):
