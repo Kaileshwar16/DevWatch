@@ -1,4 +1,4 @@
-# CallTrail / CallTrail
+# CallTrail
 
 A terminal dashboard for your development environment. Run `calltrail` inside a project to see its languages, runtimes, Git changes, Docker containers, listening ports, and runnable tasks.
 
