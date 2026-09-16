@@ -29,6 +29,12 @@ queries installed tools for versions, Git state, ports, and Docker state. Those
 installed tools and their configuration remain part of the trust boundary.
 DevDash never reads `.env` contents. Only their presence is displayed.
 
+Function tracing parses Python source with the standard library AST and packaging
+metadata as data. It never imports the application, evaluates decorators, executes
+setup.py/tests, or launches language servers. Source discovery has explicit limits,
+does not follow symlinks, and stays within the selected project boundary. Static
+results describe possible relationships and must not be treated as runtime evidence.
+
 DevDash never installs project dependencies, runs sudo, changes permissions,
 deletes runtime data, or starts Docker to repair an environment. Detected uv
 commands disable environment synchronization, downloads, and dotenv loading;

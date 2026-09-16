@@ -46,7 +46,7 @@ devdash = "devdash.cli:main"
 packages = ["devdash"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/devdash", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml", "/examples", "/SECURITY.md", "/CONTRIBUTING.md", "/RELEASE_NOTES.md", "/scripts"]
+include = ["/devdash", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE", "/pyproject.toml", "/examples", "/SECURITY.md", "/CONTRIBUTING.md", "/RELEASE_NOTES.md", "/scripts", "/docs/tracing.md"]
 
 [tool.ruff]
 target-version = "py310"

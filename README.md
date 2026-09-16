@@ -60,6 +60,7 @@ The dashboard uses a compact, neutral terminal layout with subtle section divide
 | `c` | Search commands and services; Enter runs the first match, Down moves to the list |
 | `a` | List session tasks with status, elapsed time, and exit code; Enter selects their logs |
 | `i` | Impact snapshot: changed files and selection reasons; `r` runs affected checks |
+| `f` | Explore possible static Python callers, callees, and entry paths |
 | `x` | Stop the task whose output is currently selected |
 | `r` | Refresh all panels and reload configuration |
 | `g` | Git details: `s` status, `l` log, `d` staged and unstaged diff statistics |
@@ -153,6 +154,71 @@ This first version is conservative and path-based, not a full dependency analyse
 Each distinct invocation (arguments, directory, environment, and effective timeout) runs once per batch. Aliases may appear separately in the report, but execute once. Ordinary failures and timeouts do not stop later checks. CLI output reports each executed check's status and returns the first nonzero exit code; Ctrl+C or SIGTERM cancels the queue and cleans up the active process using the existing runner. No tests or project commands run during impact discovery.
 
 JSON snapshots add `changed_files`, `affected_commands`, and `changes_error` while retaining schema version 1 and every existing field. Changed-file records include `path`, `index_status`, `worktree_status`, and optional `original_path`; `?` denotes untracked files. Affected entries contain `name`, `argv`, `cwd`, `matched_files`, `matched_patterns`, and structured `reasons` with a file, strategy, explanation, optional pattern, and nearby tests. Paths are relative to the selected project; shared changes outside a selected package use `../` and cannot match explicit project-root rules. Git failures also appear in `warnings`.
+
+## Function tracing
+
+Explore unfamiliar Python code without running the application:
+
+```bash
+devdash trace auth/token.py:117
+devdash trace decode_token
+devdash trace AuthService.decode_token
+devdash trace auth/token.py:117 --outgoing
+devdash trace auth/token.py:117 --to-entry
+devdash trace decode_token --root /path/to/project --json
+devdash trace decode_token --to-entry --max-depth 12 --max-paths 30 --max-nodes 2000
+```
+
+DevWatch performs conservative static analysis. Results represent **possible call
+relationships, not guaranteed runtime execution paths**. Tracing parses Python
+source as data: it never imports project modules, evaluates decorators, executes
+tests or setup.py, loads `.env`, or runs framework discovery.
+
+The default view shows possible static callers and their callsites. `--outgoing`
+shows possible callees, including unresolved calls. `--to-entry` follows resolved
+edges backward to likely MAIN, TEST, CLI, or HTTP entry points. UNKNOWN means no
+further resolved caller was found; it is not proof of an entry point. Cycles and
+limit truncation are shown explicitly. Paths are ordered by length, then known
+entry kinds. Ambiguous edges are visible but are not traversed into entry paths.
+
+Use an exact function name, a qualified name such as `Class.method` or
+`outer.inner`, or a **project-root-relative** `file.py:line`. Locations select the
+innermost containing definition. Ambiguous names list candidates and require a
+file/line selection. The default boundary is the nearest existing project root;
+`--root` sets an explicit boundary. Other languages report that tracing is
+unavailable. Existing `--json` and other dashboard/task flags are unchanged;
+`trace … --json` is a separate schema-version-1 object with `kind=call_hierarchy`
+and `evidence=static`. Trace exits 0 on success (including partial results with
+warnings), 1 for ambiguous/missing/unsupported targets, and 2 for usage/root errors.
+If your project directory is named `trace`, use `devdash ./trace` to disambiguate.
+
+In the dashboard press **f**, enter a query, and press Enter. With the results list
+focused: Enter selects a caller/callee, **i** shows callers, **o** shows callees,
+**e** shows entry paths, **b/Esc** walks back through history, **q** closes,
+**/** focuses search, and **r** rebuilds the graph after edits. The detail pane
+contains locations and a bounded source preview. Query letters are typed normally
+while the search box has focus. The index is created only when tracing is opened,
+on a worker thread, and unchanged file parses are reused across refreshes.
+
+Python support includes ordinary imports and aliases, relative imports, direct
+functions, nested functions, classes, and straightforward `self`/`cls` methods.
+Reflection, callback values, dependency injection, instance type inference,
+inheritance dispatch, monkey patching, framework magic, and decorator transformations
+are not inferred. Lambda bodies and comprehension scopes are not resolved in v1.
+Definition-time calls in decorators/defaults/annotations/bases are not modeled.
+Source syntax must be supported by the Python interpreter running DevDash.
+Simple `app`/`router` route decorators are labelled as heuristics, not registered
+routes. Scripts from `[project.scripts]` supply CLI labels; arbitrary configured
+shell commands are not mapped to functions.
+
+The index is bounded to 3,000 Python files, 4,000 directories, depth 30, 100,000
+directory entries, 1 MiB per file, and 32 MiB total source. Generated trees,
+virtual environments, symlinks and nested repositories are excluded. Git is not
+required; custom `.gitignore` rules are not interpreted. Warnings identify parse,
+permission and limit problems. CLI relationship output is capped at 1,000 entries;
+the interactive list uses 200. No external editor is launched in v1.
+
+See [the provider design](docs/tracing.md) for integration and future runtime plans.
 
 ## Execution outcomes
 

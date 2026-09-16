@@ -33,6 +33,8 @@ using only an editable installation.
 - `detectors/`, `discovery.py`: environment collection and per-detector degradation.
 - `doctor.py`, `diagnostics.py`: environment validation and safe diagnostics.
 - `cli.py`, `app.py`, `screens/`, `widgets/`: adapters and presentation.
+- `trace/`: bounded static source discovery, AST resolution, provider-neutral call
+  hierarchy queries and presentation; `screens/trace.py` runs analysis off the UI loop.
 
 ## Detector rules
 

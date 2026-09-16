@@ -119,7 +119,7 @@ def _nonnegative(value: str) -> float:
 def parser() -> argparse.ArgumentParser:
     cli = argparse.ArgumentParser(
         prog="devdash", description="Inspect your project, run tasks, and monitor your development environment.",
-        epilog="Commands run only when requested. Use --list-commands to see detected tasks and services.",
+        epilog="Commands run only when requested. Use --list-commands for tasks; devdash trace --help for static Python call tracing.",
     )
     cli.add_argument("path", nargs="?", default=".", help="project directory (default: current directory)")
     mode = cli.add_mutually_exclusive_group()
@@ -167,6 +167,15 @@ def initialize(root: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # Keep the established flag parser intact, including a directory named trace.
+    legacy_flags = {'--status', '--json', '--doctor', '--debug', '--run', '--affected',
+                    '--run-affected', '--list-commands', '--init', '--interval', '--timeout', '--version'}
+    if argv and argv[0] == 'trace' and (
+        len(argv) > 1 and argv[1] not in legacy_flags or len(argv) == 1 and not Path('trace').is_dir()
+    ):
+        from devdash.trace.cli import main as trace_main
+        return trace_main(argv[1:])
     args = parser().parse_args(argv)
     try:
         root = find_project_root(Path(args.path))

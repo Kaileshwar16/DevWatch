@@ -28,6 +28,8 @@ from devdash.screens.commands import CommandsScreen
 from devdash.screens.docker import DockerScreen
 from devdash.screens.git import GitScreen
 from devdash.screens.impact import ImpactScreen
+from devdash.screens.trace import TraceScreen
+from devdash.trace.python import PythonAstProvider
 from devdash.widgets.docker_panel import DockerPanel
 from devdash.widgets.git_panel import GitPanel
 from devdash.widgets.ports_panel import PortsPanel
@@ -148,6 +150,7 @@ class DevDashApp(App):
         Binding("x", "stop_command", "Stop"),
         Binding("a", "tasks", "Tasks / logs"),
         Binding("i", "impact", "Impact"),
+        Binding("f", "trace", "Trace"),
         Binding("r", "refresh", "Refresh"),
         Binding("g", "git_view", "Git"),
         Binding("d", "docker_view", "Docker"),
@@ -173,6 +176,7 @@ class DevDashApp(App):
         self.exit_signal = 0
         self._refreshing = False
         self._project_ready = False
+        self._trace_provider: PythonAstProvider | None = None
         self._has_output = False
         self._last_error = ""
 
@@ -276,6 +280,12 @@ class DevDashApp(App):
             # Hold the displayed snapshot steady until the user chooses to run it.
             commands = self._commands.copy()
             self.push_screen(ImpactScreen(self._info), lambda names: self._start_affected(names, commands))
+
+    def action_trace(self) -> None:
+        if self._project_ready:
+            if self._trace_provider is None or self._trace_provider.root != self._info.root:
+                self._trace_provider = PythonAstProvider(self._info.root)
+            self.push_screen(TraceScreen(self._trace_provider))
 
     def _start_affected(self, names: list[str] | None, commands: dict[str, Command]) -> None:
         if not names or not self._manager:

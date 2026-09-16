@@ -2,6 +2,9 @@
 
 ## 0.3.0 — unreleased
 
+- Add static Python function tracing by name or file:line, caller/callee navigation,
+  bounded entry paths, explicit ambiguity, source previews, and the dashboard's f view.
+
 - Distinguish passed/failed checks from error, unavailable, timeout and cancelled outcomes.
 - Add structured reasons, conservative test-output classification and shared command preflight.
 - Check Node script dependencies and Python environments without executing project scripts.

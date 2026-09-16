@@ -42,6 +42,13 @@ def main():
             print('PASS', ' '.join(str(flag) for flag in flags))
             if flags == ['--version']:
                 print(result.stdout.strip())
+        (project/'example.py').write_text('def main(): target()\ndef target(): pass\n'
+                                         'if __name__ == "__main__": main()\n')
+        result = run([cli, 'trace', 'target', '--root', project, '--to-entry', '--json'])
+        trace = json.loads(result.stdout)
+        assert trace['evidence'] == 'static'
+        assert [node['name'] for node in trace['paths'][0]['nodes']] == ['main', 'target']
+        print('PASS trace target --to-entry --json (installed wheel)')
         print('Imported installed package:', location)
 
 
